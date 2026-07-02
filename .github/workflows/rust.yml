@@ -37,7 +37,7 @@ jobs:
         run: cargo rbmt test --toolchain nightly --lock-file ${{ matrix.dep }}
 
   MSRV:                         # 2 jobs, one per lock file.
-    name: Test - 1.63.0 toolchain
+    name: Test - 1.74.0 toolchain
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

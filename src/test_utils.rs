@@ -7,9 +7,8 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use bitcoin::hashes::{hash160, ripemd160, sha256};
-use bitcoin::key::XOnlyPublicKey;
-#[cfg(not(test))] // https://github.com/rust-lang/rust/issues/121684
 use bitcoin::secp256k1;
+use bitcoin::XOnlyPublicKey;
 
 use crate::miniscript::context::SigType;
 use crate::{hash256, ToPublicKey, Translator};
@@ -129,7 +128,7 @@ fn random_sks(n: usize) -> Vec<secp256k1::SecretKey> {
         sk[2] = (i >> 16) as u8;
         sk[3] = (i >> 24) as u8;
 
-        let sk = secp256k1::SecretKey::from_slice(&sk[..]).expect("secret key");
+        let sk = secp256k1::SecretKey::from_secret_bytes(sk).expect("secret key");
         sks.push(sk)
     }
     sks
@@ -137,11 +136,10 @@ fn random_sks(n: usize) -> Vec<secp256k1::SecretKey> {
 
 impl StrKeyTranslator {
     pub fn new() -> Self {
-        let secp = secp256k1::Secp256k1::new();
         let sks = random_sks(26);
         let pks: Vec<_> = sks
             .iter()
-            .map(|sk| bitcoin::PublicKey::new(secp256k1::PublicKey::from_secret_key(&secp, sk)))
+            .map(|sk| bitcoin::PublicKey::from_secp(secp256k1::PublicKey::from_secret_key(sk)))
             .collect();
         let mut pk_map = HashMap::new();
         let mut pkh_map = HashMap::new();
@@ -164,14 +162,13 @@ impl StrKeyTranslator {
 
 impl StrXOnlyKeyTranslator {
     pub fn new() -> Self {
-        let secp = secp256k1::Secp256k1::new();
         let sks = random_sks(26);
-        let pks: Vec<_> = sks
+        let pks: Vec<XOnlyPublicKey> = sks
             .iter()
             .map(|sk| {
-                let keypair = secp256k1::Keypair::from_secret_key(&secp, sk);
-                let (pk, _parity) = XOnlyPublicKey::from_keypair(&keypair);
-                pk
+                let keypair = secp256k1::Keypair::from_secret_key(sk);
+                let (pk, _parity) = secp256k1::XOnlyPublicKey::from_keypair(&keypair);
+                XOnlyPublicKey::from_secp(pk)
             })
             .collect();
         let mut pk_map = HashMap::new();

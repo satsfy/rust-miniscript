@@ -5,6 +5,7 @@
 use std::str::FromStr;
 
 use miniscript::bitcoin::consensus::Decodable;
+use miniscript::bitcoin::script::ScriptPubKeyBuf as ScriptBuf;
 use miniscript::bitcoin::secp256k1::Secp256k1;
 use miniscript::bitcoin::{absolute, sighash, Sequence};
 use miniscript::interpreter::KeySigPair;
@@ -17,10 +18,12 @@ fn main() {
     let tx = hard_coded_transaction();
     let spk_input_1 = hard_coded_script_pubkey();
 
+    let script_sig_as_spk =
+        bitcoin::script::ScriptPubKey::from_bytes(tx.inputs[0].script_sig.as_bytes());
     let interpreter = miniscript::Interpreter::from_txdata(
         &spk_input_1,
-        &tx.input[0].script_sig,
-        &tx.input[0].witness,
+        script_sig_as_spk,
+        &tx.inputs[0].witness,
         Sequence::ZERO,
         absolute::LockTime::ZERO,
     )
@@ -63,13 +66,12 @@ fn main() {
     // as having participated in the script
 
     println!("\n\nExample two:\n");
-    let secp = Secp256k1::new();
 
     // We can set prevouts to be empty list because this is a legacy transaction
     // and this information is not required for sighash computation.
     let prevouts = sighash::Prevouts::All::<bitcoin::TxOut>(&[]);
 
-    for elem in interpreter.iter(&secp, &tx, 0, &prevouts) {
+    for elem in interpreter.iter(&tx, 0, &prevouts) {
         if let miniscript::interpreter::SatisfiedConstraint::PublicKey { key_sig } =
             elem.expect("no evaluation error")
         {
@@ -82,15 +84,13 @@ fn main() {
     //
     // Same, but with the wrong signature hash, to demonstrate what happens
     // given an apparently invalid script.
-    let secp = Secp256k1::new();
+    let _secp = Secp256k1::new();
     let message = secp256k1::Message::from_digest([0x01; 32]);
 
     let iter = interpreter.iter_custom(Box::new(|key_sig: &KeySigPair| {
         let (pk, ecdsa_sig) = key_sig.as_ecdsa().expect("Ecdsa Sig");
         ecdsa_sig.sighash_type == bitcoin::sighash::EcdsaSighashType::All
-            && secp
-                .verify_ecdsa(&message, &ecdsa_sig.signature, &pk.inner)
-                .is_ok()
+            && ecdsa_sig.signature.verify(message, &pk.to_inner()).is_ok()
     }));
 
     println!("\n\nExample three:\n");
@@ -161,8 +161,8 @@ fn hard_coded_transaction() -> bitcoin::Transaction {
     bitcoin::Transaction::consensus_decode(&mut &tx_bytes[..]).expect("decode transaction")
 }
 
-fn hard_coded_script_pubkey() -> bitcoin::ScriptBuf {
-    bitcoin::ScriptBuf::from(vec![
+fn hard_coded_script_pubkey() -> ScriptBuf {
+    ScriptBuf::from(vec![
         0xa9, 0x14, 0x92, 0x09, 0xa8, 0xf9, 0x0c, 0x58, 0x4b, 0xb5, 0x97, 0x4d, 0x58, 0x68, 0x72,
         0x49, 0xe5, 0x32, 0xde, 0x59, 0xf4, 0xbc, 0x87,
     ])
