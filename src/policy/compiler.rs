@@ -1237,18 +1237,15 @@ mod tests {
             sk[1] = (i >> 8) as u8;
             sk[2] = (i >> 16) as u8;
 
-            let pk = bitcoin::PublicKey {
-                inner: secp256k1::PublicKey::from_secret_key(
-                    &secp,
-                    &secp256k1::SecretKey::from_slice(&sk[..]).expect("sk"),
-                ),
-                compressed: true,
-            };
+            let pk = bitcoin::PublicKey::from_secp(secp256k1::PublicKey::from_secret_key(
+                &secp256k1::SecretKey::from_secret_bytes(sk).expect("sk"),
+            ));
             ret.push(pk);
         }
-        let sig = secp.sign_ecdsa(
-            &secp256k1::Message::from_digest(sk), // Not a digest but 32 bytes nonetheless.
-            &secp256k1::SecretKey::from_slice(&sk[..]).expect("secret key"),
+        let _ = &secp;
+        let sig = secp256k1::ecdsa::sign(
+            secp256k1::Message::from_digest(sk), // Not a digest but 32 bytes nonetheless.
+            &secp256k1::SecretKey::from_secret_bytes(sk).expect("secret key"),
         );
         (ret, sig)
     }
@@ -1332,13 +1329,11 @@ mod tests {
 
         let policy: BPolicy = Concrete::Key(keys[0]);
         let ms: SegwitMiniScript = policy.compile().unwrap();
-        assert_eq!(
-            ms.encode(),
-            script::Builder::new()
-                .push_key(&keys[0])
-                .push_opcode(opcodes::all::OP_CHECKSIG)
-                .into_script()
-        );
+        let expected: script::WitnessScriptBuf = script::Builder::new()
+            .push_key(keys[0])
+            .push_opcode(opcodes::all::OP_CHECKSIG)
+            .into_script();
+        assert_eq!(ms.encode(), expected);
 
         // CSV reordering trick
         let policy: BPolicy = policy_str!(
@@ -1348,19 +1343,17 @@ mod tests {
             keys[7]
         );
         let ms: SegwitMiniScript = policy.compile().unwrap();
-        assert_eq!(
-            ms.encode(),
-            script::Builder::new()
-                .push_opcode(opcodes::all::OP_PUSHNUM_2)
-                .push_key(&keys[5])
-                .push_key(&keys[6])
-                .push_key(&keys[7])
-                .push_opcode(opcodes::all::OP_PUSHNUM_3)
-                .push_opcode(opcodes::all::OP_CHECKMULTISIGVERIFY)
-                .push_int(10000)
-                .push_opcode(opcodes::all::OP_CSV)
-                .into_script()
-        );
+        let expected: script::WitnessScriptBuf = script::Builder::new()
+            .push_opcode(opcodes::all::OP_PUSHNUM_2)
+            .push_key(keys[5])
+            .push_key(keys[6])
+            .push_key(keys[7])
+            .push_opcode(opcodes::all::OP_PUSHNUM_3)
+            .push_opcode(opcodes::all::OP_CHECKMULTISIGVERIFY)
+            .push_int_unchecked(10000)
+            .push_opcode(opcodes::all::OP_CSV)
+            .into_script();
+        assert_eq!(ms.encode(), expected);
 
         // Liquid policy
         let policy: BPolicy = Concrete::Or(vec![

@@ -7,22 +7,23 @@
 //! encoding in Bitcoin script, as well as a datatype. Full details
 //! are given on the Miniscript website.
 
-use bitcoin::hashes::Hash;
-use bitcoin::{absolute, opcodes, script};
+use bitcoin::{absolute, opcodes};
 
 use crate::miniscript::context::SigType;
 use crate::miniscript::ScriptContext;
 use crate::util::MsKeyBuilder;
 use crate::{Miniscript, MiniscriptKey, Terminal, ToPublicKey};
 
-/// Helper trait to add a `push_astelem` method to `script::Builder`
+/// Helper trait to add a `push_astelem` method to `bitcoin::script::Builder<T>`.
 trait PushAstElem<Pk: MiniscriptKey, Ctx: ScriptContext> {
     fn push_astelem(self, ast: &Miniscript<Pk, Ctx>) -> Self
     where
         Pk: ToPublicKey;
 }
 
-impl<Pk: MiniscriptKey, Ctx: ScriptContext> PushAstElem<Pk, Ctx> for script::Builder {
+impl<T, Pk: MiniscriptKey, Ctx: ScriptContext> PushAstElem<Pk, Ctx>
+    for bitcoin::script::Builder<T>
+{
     fn push_astelem(self, ast: &Miniscript<Pk, Ctx>) -> Self
     where
         Pk: ToPublicKey,
@@ -35,7 +36,7 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Terminal<Pk, Ctx> {
     /// Encode the element as a fragment of Bitcoin Script. The inverse
     /// function, from Script to an AST element, is implemented in the
     /// `parse` module.
-    pub fn encode(&self, mut builder: script::Builder) -> script::Builder
+    pub fn encode<T>(&self, mut builder: bitcoin::script::Builder<T>) -> bitcoin::script::Builder<T>
     where
         Pk: ToPublicKey,
     {
@@ -52,41 +53,41 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Terminal<Pk, Ctx> {
                 .push_slice(hash.to_byte_array())
                 .push_opcode(opcodes::all::OP_EQUALVERIFY),
             Self::After(t) => builder
-                .push_int(absolute::LockTime::from(t).to_consensus_u32() as i64)
+                .push_int_unchecked(absolute::LockTime::from(t).to_consensus_u32() as i64)
                 .push_opcode(opcodes::all::OP_CLTV),
             Self::Older(t) => builder
-                .push_int(t.to_consensus_u32().into())
+                .push_int_unchecked(t.to_consensus_u32() as i64)
                 .push_opcode(opcodes::all::OP_CSV),
             Self::Sha256(ref h) => builder
                 .push_opcode(opcodes::all::OP_SIZE)
-                .push_int(32)
+                .push_int_unchecked(32)
                 .push_opcode(opcodes::all::OP_EQUALVERIFY)
                 .push_opcode(opcodes::all::OP_SHA256)
                 .push_slice(Pk::to_sha256(h).to_byte_array())
                 .push_opcode(opcodes::all::OP_EQUAL),
             Self::Hash256(ref h) => builder
                 .push_opcode(opcodes::all::OP_SIZE)
-                .push_int(32)
+                .push_int_unchecked(32)
                 .push_opcode(opcodes::all::OP_EQUALVERIFY)
                 .push_opcode(opcodes::all::OP_HASH256)
                 .push_slice(Pk::to_hash256(h).to_byte_array())
                 .push_opcode(opcodes::all::OP_EQUAL),
             Self::Ripemd160(ref h) => builder
                 .push_opcode(opcodes::all::OP_SIZE)
-                .push_int(32)
+                .push_int_unchecked(32)
                 .push_opcode(opcodes::all::OP_EQUALVERIFY)
                 .push_opcode(opcodes::all::OP_RIPEMD160)
                 .push_slice(Pk::to_ripemd160(h).to_byte_array())
                 .push_opcode(opcodes::all::OP_EQUAL),
             Self::Hash160(ref h) => builder
                 .push_opcode(opcodes::all::OP_SIZE)
-                .push_int(32)
+                .push_int_unchecked(32)
                 .push_opcode(opcodes::all::OP_EQUALVERIFY)
                 .push_opcode(opcodes::all::OP_HASH160)
                 .push_slice(Pk::to_hash160(h).to_byte_array())
                 .push_opcode(opcodes::all::OP_EQUAL),
-            Self::True => builder.push_opcode(opcodes::OP_TRUE),
-            Self::False => builder.push_opcode(opcodes::OP_FALSE),
+            Self::True => builder.push_opcode(opcodes::all::OP_PUSHNUM_1),
+            Self::False => builder.push_opcode(opcodes::all::OP_0),
             Self::Alt(ref sub) => builder
                 .push_opcode(opcodes::all::OP_TOALTSTACK)
                 .push_astelem(sub)
@@ -149,7 +150,7 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Terminal<Pk, Ctx> {
                     builder = builder.push_astelem(sub).push_opcode(opcodes::all::OP_ADD);
                 }
                 builder
-                    .push_int(thresh.k() as i64)
+                    .push_int_unchecked(thresh.k() as i64)
                     .push_opcode(opcodes::all::OP_EQUAL)
             }
             Self::Multi(ref thresh) | Self::SortedMulti(ref thresh) => {
@@ -161,12 +162,12 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Terminal<Pk, Ctx> {
                 } else {
                     thresh.iter()
                 };
-                builder = builder.push_int(thresh.k() as i64);
+                builder = builder.push_int_unchecked(thresh.k() as i64);
                 for pk in iter {
-                    builder = builder.push_key(&pk.to_public_key());
+                    builder = builder.push_key(pk.to_public_key());
                 }
                 builder
-                    .push_int(thresh.n() as i64)
+                    .push_int_unchecked(thresh.n() as i64)
                     .push_opcode(opcodes::all::OP_CHECKMULTISIG)
             }
             Self::MultiA(ref thresh) | Self::SortedMultiA(ref thresh) => {
@@ -188,7 +189,7 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Terminal<Pk, Ctx> {
                     builder = builder.push_opcode(opcodes::all::OP_CHECKSIGADD);
                 }
                 builder
-                    .push_int(thresh.k() as i64)
+                    .push_int_unchecked(thresh.k() as i64)
                     .push_opcode(opcodes::all::OP_NUMEQUAL)
             }
         }

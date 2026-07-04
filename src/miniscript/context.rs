@@ -617,7 +617,7 @@ impl ScriptContext for Segwitv0 {
 pub enum Tap {}
 
 impl ScriptContext for Tap {
-    type Key = bitcoin::secp256k1::XOnlyPublicKey;
+    type Key = bitcoin::XOnlyPublicKey;
 
     const CONSENSUS: ValidationParams = ValidationParams {
         allow_compressed_keys: false,

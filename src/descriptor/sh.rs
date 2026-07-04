@@ -10,8 +10,8 @@
 use core::convert::TryFrom;
 use core::fmt;
 
-use bitcoin::script::PushBytes;
-use bitcoin::{script, Address, Network, ScriptBuf, Weight};
+use bitcoin::script::{PushBytes, ScriptExt as _, WitnessScriptBuf, WitnessScriptExt as _};
+use bitcoin::{Address, Network, Weight};
 
 use super::{Wpkh, Wsh};
 use crate::descriptor::write_descriptor;
@@ -242,50 +242,68 @@ impl<Pk: MiniscriptKey> Sh<Pk> {
 
 impl<Pk: MiniscriptKey + ToPublicKey> Sh<Pk> {
     /// Obtains the corresponding script pubkey for this descriptor.
-    pub fn script_pubkey(&self) -> ScriptBuf {
+    pub fn script_pubkey(&self) -> bitcoin::script::ScriptPubKeyBuf {
         match self.inner {
-            ShInner::Wsh(ref wsh) => wsh.script_pubkey().to_p2sh(),
-            ShInner::Wpkh(ref wpkh) => wpkh.script_pubkey().to_p2sh(),
-            ShInner::Ms(ref ms) => ms.encode().to_p2sh(),
+            ShInner::Wsh(ref wsh) => wsh
+                .script_pubkey()
+                .to_p2sh()
+                .expect("redeem script within size bounds"),
+            ShInner::Wpkh(ref wpkh) => wpkh
+                .script_pubkey()
+                .to_p2sh()
+                .expect("redeem script within size bounds"),
+            ShInner::Ms(ref ms) => {
+                let redeem: bitcoin::script::RedeemScriptBuf = ms.encode();
+                redeem.to_p2sh().expect("redeem script within size bounds")
+            }
         }
     }
 
     /// Obtains the corresponding address for this descriptor.
     pub fn address(&self, network: Network) -> Address {
-        let addr = self.address_fallible(network);
-
+        // The redeem script for a P2SH-wrapped segwit descriptor is the wrapped
+        // segwit output's scriptPubKey, not the inner witness/redeem script.
         // Size is checked in `check_global_consensus_validity`.
-        assert!(addr.is_ok());
-        addr.expect("only fails if size > MAX_SCRIPT_ELEMENT_SIZE")
-    }
-
-    fn address_fallible(&self, network: Network) -> Result<Address, Error> {
-        let script = match self.inner {
-            ShInner::Wsh(ref wsh) => wsh.script_pubkey(),
-            ShInner::Wpkh(ref wpkh) => wpkh.script_pubkey(),
-            ShInner::Ms(ref ms) => ms.encode(),
-        };
-        let address = Address::p2sh(&script, network)?;
-
-        Ok(address)
-    }
-
-    /// Obtain the underlying miniscript for this descriptor
-    pub fn inner_script(&self) -> ScriptBuf {
         match self.inner {
-            ShInner::Wsh(ref wsh) => wsh.inner_script(),
-            ShInner::Wpkh(ref wpkh) => wpkh.script_pubkey(),
+            ShInner::Wsh(ref wsh) => Address::p2sh(&wsh.script_pubkey(), network)
+                .expect("redeem script within size bounds"),
+            ShInner::Wpkh(ref wpkh) => Address::p2sh(&wpkh.script_pubkey(), network)
+                .expect("redeem script within size bounds"),
+            ShInner::Ms(ref ms) => {
+                let redeem: bitcoin::script::RedeemScriptBuf = ms.encode();
+                Address::p2sh(&redeem, network).expect("redeem script within size bounds")
+            }
+        }
+    }
+
+    /// Obtain the underlying miniscript for this descriptor, tagged as a
+    /// redeem script.
+    ///
+    /// For `Sh(Wsh)` this returns the inner witness script; for `Sh(Wpkh)`
+    /// and `Sh(Ms)` it returns the redeem script itself.
+    pub fn inner_script(&self) -> bitcoin::script::RedeemScriptBuf {
+        match self.inner {
+            ShInner::Wsh(ref wsh) => {
+                bitcoin::script::RedeemScriptBuf::from_bytes(wsh.inner_script().into_bytes())
+            }
+            ShInner::Wpkh(ref wpkh) => {
+                bitcoin::script::RedeemScriptBuf::from_bytes(wpkh.script_pubkey().into_bytes())
+            }
             ShInner::Ms(ref ms) => ms.encode(),
         }
     }
 
     /// Obtains the pre bip-340 signature script code for this descriptor.
-    pub fn ecdsa_sighash_script_code(&self) -> ScriptBuf {
+    pub fn ecdsa_sighash_script_code(&self) -> bitcoin::script::RedeemScriptBuf {
         match self.inner {
             //     - For P2WSH witness program, if the witnessScript does not contain any `OP_CODESEPARATOR`,
             //       the `scriptCode` is the `witnessScript` serialized as scripts inside CTxOut.
-            ShInner::Wsh(ref wsh) => wsh.ecdsa_sighash_script_code(),
-            ShInner::Wpkh(ref wpkh) => wpkh.ecdsa_sighash_script_code(),
+            ShInner::Wsh(ref wsh) => bitcoin::script::RedeemScriptBuf::from_bytes(
+                wsh.ecdsa_sighash_script_code().into_bytes(),
+            ),
+            ShInner::Wpkh(ref wpkh) => bitcoin::script::RedeemScriptBuf::from_bytes(
+                wpkh.ecdsa_sighash_script_code().into_bytes(),
+            ),
             // For "legacy" P2SH outputs, it is defined as the txo's redeemScript.
             ShInner::Ms(ref ms) => ms.encode(),
         }
@@ -298,29 +316,38 @@ impl<Pk: MiniscriptKey + ToPublicKey> Sh<Pk> {
     /// This is used in Segwit transactions to produce an unsigned transaction
     /// whose txid will not change during signing (since only the witness data
     /// will change).
-    pub fn unsigned_script_sig(&self) -> ScriptBuf {
+    pub fn unsigned_script_sig(&self) -> bitcoin::script::ScriptSigBuf {
         match self.inner {
             ShInner::Wsh(ref wsh) => {
                 // wsh explicit must contain exactly 1 element
-                let witness_script = wsh.inner_script().to_p2wsh();
+                let witness_script = WitnessScriptBuf::from(wsh.inner_script().into_bytes())
+                    .to_p2wsh()
+                    .expect("Witness script is not too large");
                 let push_bytes = <&PushBytes>::try_from(witness_script.as_bytes())
                     .expect("Witness script is not too large");
-                script::Builder::new().push_slice(push_bytes).into_script()
+                bitcoin::script::Builder::<bitcoin::script::ScriptSigTag>::new()
+                    .push_slice(push_bytes)
+                    .into_script()
             }
             ShInner::Wpkh(ref wpkh) => {
                 let redeem_script = wpkh.script_pubkey();
                 let push_bytes: &PushBytes =
                     <&PushBytes>::try_from(redeem_script.as_bytes()).expect("Script not too large");
-                script::Builder::new().push_slice(push_bytes).into_script()
+                bitcoin::script::Builder::<bitcoin::script::ScriptSigTag>::new()
+                    .push_slice(push_bytes)
+                    .into_script()
             }
-            ShInner::Ms(..) => ScriptBuf::new(),
+            ShInner::Ms(..) => bitcoin::script::ScriptSigBuf::new(),
         }
     }
 
     /// Returns satisfying non-malleable witness and scriptSig with minimum
     /// weight to spend an output controlled by the given descriptor if it is
     /// possible to construct one using the `satisfier`.
-    pub fn get_satisfaction<S>(&self, satisfier: S) -> Result<(Vec<Vec<u8>>, ScriptBuf), Error>
+    pub fn get_satisfaction<S>(
+        &self,
+        satisfier: S,
+    ) -> Result<(Vec<Vec<u8>>, bitcoin::script::ScriptSigBuf), Error>
     where
         S: Satisfier<Pk>,
     {
@@ -336,7 +363,8 @@ impl<Pk: MiniscriptKey + ToPublicKey> Sh<Pk> {
             }
             ShInner::Ms(ref ms) => {
                 let mut script_witness = ms.satisfy(satisfier)?;
-                script_witness.push(ms.encode().into_bytes());
+                let encoded: bitcoin::script::RedeemScriptBuf = ms.encode();
+                script_witness.push(encoded.into_bytes());
                 let script_sig = witness_to_scriptsig(&script_witness);
                 let witness = vec![];
                 Ok((witness, script_sig))
@@ -347,7 +375,10 @@ impl<Pk: MiniscriptKey + ToPublicKey> Sh<Pk> {
     /// Returns satisfying, possibly malleable, witness and scriptSig with
     /// minimum weight to spend an output controlled by the given descriptor if
     /// it is possible to construct one using the `satisfier`.
-    pub fn get_satisfaction_mall<S>(&self, satisfier: S) -> Result<(Vec<Vec<u8>>, ScriptBuf), Error>
+    pub fn get_satisfaction_mall<S>(
+        &self,
+        satisfier: S,
+    ) -> Result<(Vec<Vec<u8>>, bitcoin::script::ScriptSigBuf), Error>
     where
         S: Satisfier<Pk>,
     {
@@ -359,7 +390,8 @@ impl<Pk: MiniscriptKey + ToPublicKey> Sh<Pk> {
             }
             ShInner::Ms(ref ms) => {
                 let mut script_witness = ms.satisfy_malleable(satisfier)?;
-                script_witness.push(ms.encode().into_bytes());
+                let encoded: bitcoin::script::RedeemScriptBuf = ms.encode();
+                script_witness.push(encoded.into_bytes());
                 let script_sig = witness_to_scriptsig(&script_witness);
                 let witness = vec![];
                 Ok((witness, script_sig))

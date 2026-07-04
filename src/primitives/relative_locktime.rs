@@ -73,11 +73,15 @@ impl RelLockTime {
 
     /// Returns the later of two locktimes of the same unit, or `None` if units differ.
     pub(crate) fn max(a: Self, b: Self) -> Option<Self> {
-        use core::cmp::Ordering::*;
-        match relative::LockTime::from(a).partial_cmp(&relative::LockTime::from(b)) {
-            Some(Greater) | Some(Equal) => Some(a),
-            Some(Less) => Some(b),
-            None => None,
+        if a.is_height_locked() != b.is_height_locked() {
+            return None;
+        }
+        // Within the same unit, the low 16 bits of the consensus encoding order the
+        // same way as the unit, and the unit bit (bit 22) is equal on both sides.
+        if a.to_consensus_u32() >= b.to_consensus_u32() {
+            Some(a)
+        } else {
+            Some(b)
         }
     }
 }

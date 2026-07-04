@@ -16,9 +16,8 @@ use core::ops::Range;
 use core::str::{self, FromStr};
 
 use bitcoin::hashes::{hash160, ripemd160, sha256};
-use bitcoin::{
-    secp256k1, Address, Network, Script, ScriptBuf, TxIn, Weight, Witness, WitnessVersion,
-};
+use bitcoin::script::{ScriptPubKey, ScriptPubKeyBuf};
+use bitcoin::{Address, Network, TxIn, Weight, Witness, WitnessVersion};
 use sync::Arc;
 
 use crate::expression::FromTree as _;
@@ -418,7 +417,7 @@ impl<Pk: MiniscriptKey + ToPublicKey> Descriptor<Pk> {
     }
 
     /// Computes the scriptpubkey of the descriptor.
-    pub fn script_pubkey(&self) -> ScriptBuf {
+    pub fn script_pubkey(&self) -> ScriptPubKeyBuf {
         match *self {
             Self::Bare(ref bare) => bare.script_pubkey(),
             Self::Pkh(ref pkh) => pkh.script_pubkey(),
@@ -436,14 +435,14 @@ impl<Pk: MiniscriptKey + ToPublicKey> Descriptor<Pk> {
     /// This is used in Segwit transactions to produce an unsigned transaction
     /// whose txid will not change during signing (since only the witness data
     /// will change).
-    pub fn unsigned_script_sig(&self) -> ScriptBuf {
+    pub fn unsigned_script_sig(&self) -> bitcoin::script::ScriptSigBuf {
         match *self {
-            Self::Bare(_) => ScriptBuf::new(),
-            Self::Pkh(_) => ScriptBuf::new(),
-            Self::Wpkh(_) => ScriptBuf::new(),
-            Self::Wsh(_) => ScriptBuf::new(),
+            Self::Bare(_) => bitcoin::script::ScriptSigBuf::new(),
+            Self::Pkh(_) => bitcoin::script::ScriptSigBuf::new(),
+            Self::Wpkh(_) => bitcoin::script::ScriptSigBuf::new(),
+            Self::Wsh(_) => bitcoin::script::ScriptSigBuf::new(),
             Self::Sh(ref sh) => sh.unsigned_script_sig(),
-            Self::Tr(_) => ScriptBuf::new(),
+            Self::Tr(_) => bitcoin::script::ScriptSigBuf::new(),
         }
     }
 
@@ -453,13 +452,13 @@ impl<Pk: MiniscriptKey + ToPublicKey> Descriptor<Pk> {
     ///
     /// # Errors
     /// If the descriptor is a taproot descriptor.
-    pub fn explicit_script(&self) -> Result<ScriptBuf, Error> {
+    pub fn explicit_script(&self) -> Result<ScriptPubKeyBuf, Error> {
         match *self {
             Self::Bare(ref bare) => Ok(bare.script_pubkey()),
             Self::Pkh(ref pkh) => Ok(pkh.script_pubkey()),
             Self::Wpkh(ref wpkh) => Ok(wpkh.script_pubkey()),
-            Self::Wsh(ref wsh) => Ok(wsh.inner_script()),
-            Self::Sh(ref sh) => Ok(sh.inner_script()),
+            Self::Wsh(ref wsh) => Ok(ScriptPubKeyBuf::from_bytes(wsh.inner_script().into_bytes())),
+            Self::Sh(ref sh) => Ok(ScriptPubKeyBuf::from_bytes(sh.inner_script().into_bytes())),
             Self::Tr(_) => Err(Error::TrNoScriptCode),
         }
     }
@@ -471,13 +470,17 @@ impl<Pk: MiniscriptKey + ToPublicKey> Descriptor<Pk> {
     ///
     /// # Errors
     /// If the descriptor is a taproot descriptor.
-    pub fn script_code(&self) -> Result<ScriptBuf, Error> {
+    pub fn script_code(&self) -> Result<ScriptPubKeyBuf, Error> {
         match *self {
             Self::Bare(ref bare) => Ok(bare.ecdsa_sighash_script_code()),
             Self::Pkh(ref pkh) => Ok(pkh.ecdsa_sighash_script_code()),
             Self::Wpkh(ref wpkh) => Ok(wpkh.ecdsa_sighash_script_code()),
-            Self::Wsh(ref wsh) => Ok(wsh.ecdsa_sighash_script_code()),
-            Self::Sh(ref sh) => Ok(sh.ecdsa_sighash_script_code()),
+            Self::Wsh(ref wsh) => {
+                Ok(ScriptPubKeyBuf::from_bytes(wsh.ecdsa_sighash_script_code().into_bytes()))
+            }
+            Self::Sh(ref sh) => {
+                Ok(ScriptPubKeyBuf::from_bytes(sh.ecdsa_sighash_script_code().into_bytes()))
+            }
             Self::Tr(_) => Err(Error::TrNoScriptCode),
         }
     }
@@ -485,7 +488,10 @@ impl<Pk: MiniscriptKey + ToPublicKey> Descriptor<Pk> {
     /// Returns satisfying non-malleable witness and scriptSig to spend an
     /// output controlled by the given descriptor if it possible to
     /// construct one using the satisfier S.
-    pub fn get_satisfaction<S>(&self, satisfier: S) -> Result<(Vec<Vec<u8>>, ScriptBuf), Error>
+    pub fn get_satisfaction<S>(
+        &self,
+        satisfier: S,
+    ) -> Result<(Vec<Vec<u8>>, bitcoin::script::ScriptSigBuf), Error>
     where
         S: Satisfier<Pk>,
     {
@@ -502,7 +508,10 @@ impl<Pk: MiniscriptKey + ToPublicKey> Descriptor<Pk> {
     /// Returns a possilbly mallable satisfying non-malleable witness and scriptSig to spend an
     /// output controlled by the given descriptor if it possible to
     /// construct one using the satisfier S.
-    pub fn get_satisfaction_mall<S>(&self, satisfier: S) -> Result<(Vec<Vec<u8>>, ScriptBuf), Error>
+    pub fn get_satisfaction_mall<S>(
+        &self,
+        satisfier: S,
+    ) -> Result<(Vec<Vec<u8>>, bitcoin::script::ScriptSigBuf), Error>
     where
         S: Satisfier<Pk>,
     {
@@ -776,14 +785,13 @@ impl Descriptor<DescriptorPublicKey> {
     /// This is a shorthand for:
     ///
     /// ```
-    /// # use miniscript::{Descriptor, DescriptorPublicKey, bitcoin::secp256k1::Secp256k1};
+    /// # use miniscript::{Descriptor, DescriptorPublicKey};
     /// # use core::str::FromStr;
     /// # let descriptor = Descriptor::<DescriptorPublicKey>::from_str("tr(xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/0/*)")
     ///     .expect("Valid ranged descriptor");
     /// # let index = 42;
-    /// # let secp = Secp256k1::verification_only();
-    /// let derived_descriptor = descriptor.derive_at_index(index).unwrap().derived_descriptor(&secp);
-    /// # assert_eq!(descriptor.derived_descriptor(&secp, index).unwrap(), derived_descriptor);
+    /// let derived_descriptor = descriptor.derive_at_index(index).unwrap().derived_descriptor();
+    /// # assert_eq!(descriptor.derived_descriptor(index).unwrap(), derived_descriptor);
     /// ```
     ///
     /// and is only here really here for backwards compatibility.
@@ -797,31 +805,23 @@ impl Descriptor<DescriptorPublicKey> {
     /// This function will return an error for multi-path descriptors
     /// or if hardened derivation is attempted,
     #[allow(deprecated)]
-    pub fn derived_descriptor<C: secp256k1::Verification>(
+    pub fn derived_descriptor(
         &self,
-        secp: &secp256k1::Secp256k1<C>,
         index: u32,
     ) -> Result<Descriptor<bitcoin::PublicKey>, NonDefiniteKeyError> {
-        Ok(self.at_derivation_index(index)?.derived_descriptor(secp))
+        Ok(self.at_derivation_index(index)?.derived_descriptor())
     }
 
     /// Parse a descriptor that may contain secret keys
     ///
     /// Internally turns every secret key found into the corresponding public key and then returns a
     /// a descriptor that only contains public keys and a map to lookup the secret key given a public key.
-    pub fn parse_descriptor<C: secp256k1::Signing>(
-        secp: &secp256k1::Secp256k1<C>,
-        s: &str,
-    ) -> Result<(Self, KeyMap), Error> {
-        fn parse_key<C: secp256k1::Signing>(
-            s: &str,
-            key_map: &mut KeyMap,
-            secp: &secp256k1::Secp256k1<C>,
-        ) -> Result<DescriptorPublicKey, Error> {
+    pub fn parse_descriptor(s: &str) -> Result<(Self, KeyMap), Error> {
+        fn parse_key(s: &str, key_map: &mut KeyMap) -> Result<DescriptorPublicKey, Error> {
             match DescriptorSecretKey::from_str(s) {
                 Ok(sk) => {
                     let pk = key_map
-                        .insert(secp, sk)
+                        .insert(sk)
                         .map_err(|e| Error::Unexpected(e.to_string()))?;
                     Ok(pk)
                 }
@@ -835,16 +835,16 @@ impl Descriptor<DescriptorPublicKey> {
             }
         }
 
-        let mut keymap_pk = KeyMapWrapper(KeyMap::new(), secp);
+        let mut keymap_pk = KeyMapWrapper(KeyMap::new());
 
-        struct KeyMapWrapper<'a, C: secp256k1::Signing>(KeyMap, &'a secp256k1::Secp256k1<C>);
+        struct KeyMapWrapper(KeyMap);
 
-        impl<C: secp256k1::Signing> Translator<String> for KeyMapWrapper<'_, C> {
+        impl Translator<String> for KeyMapWrapper {
             type TargetPk = DescriptorPublicKey;
             type Error = Error;
 
             fn pk(&mut self, pk: &String) -> Result<DescriptorPublicKey, Error> {
-                parse_key(pk, &mut self.0, self.1)
+                parse_key(pk, &mut self.0)
             }
 
             fn sha256(&mut self, sha256: &String) -> Result<sha256::Hash, Error> {
@@ -933,14 +933,13 @@ impl Descriptor<DescriptorPublicKey> {
     /// descriptor at that index. If the descriptor is non-derivable then it will simply check the
     /// script pubkey against the descriptor and return it if it matches (in this case the index
     /// returned will be meaningless).
-    pub fn find_derivation_index_for_spk<C: secp256k1::Verification>(
+    pub fn find_derivation_index_for_spk(
         &self,
-        secp: &secp256k1::Secp256k1<C>,
-        script_pubkey: &Script,
+        script_pubkey: &ScriptPubKey,
         range: Range<u32>,
     ) -> Result<Option<(u32, Descriptor<bitcoin::PublicKey>)>, NonDefiniteKeyError> {
         if !self.has_wildcard() {
-            let concrete = self.into_definite()?.derived_descriptor(secp);
+            let concrete = self.into_definite()?.derived_descriptor();
             if &concrete.script_pubkey() == script_pubkey {
                 return Ok(Some((0, concrete)));
             }
@@ -948,10 +947,7 @@ impl Descriptor<DescriptorPublicKey> {
         }
 
         for i in range {
-            let concrete = self
-                .derive_at_index(i)
-                .into_result()?
-                .derived_descriptor(secp);
+            let concrete = self.derive_at_index(i).into_result()?.derived_descriptor();
             if &concrete.script_pubkey() == script_pubkey {
                 return Ok(Some((i, concrete)));
             }
@@ -1080,34 +1076,30 @@ impl Descriptor<DefiniteDescriptorKey> {
     /// use std::str::FromStr;
     ///
     /// // test from bip 86
-    /// let secp = secp256k1::Secp256k1::verification_only();
     /// let descriptor = Descriptor::<DescriptorPublicKey>::from_str("tr(xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/0/*)")
     ///     .expect("Valid ranged descriptor");
-    /// let result = descriptor.derive_at_index(0).unwrap().derived_descriptor(&secp);
+    /// let result = descriptor.derive_at_index(0).unwrap().derived_descriptor();
     /// assert_eq!(result.to_string(), "tr(03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115)#6qm9h8ym");
     /// ```
     ///
     /// # Errors
     ///
     /// This function will return an error if hardened derivation is attempted.
-    pub fn derived_descriptor<C: secp256k1::Verification>(
-        &self,
-        secp: &secp256k1::Secp256k1<C>,
-    ) -> Descriptor<bitcoin::PublicKey> {
-        struct Derivator<'a, C: secp256k1::Verification>(&'a secp256k1::Secp256k1<C>);
+    pub fn derived_descriptor(&self) -> Descriptor<bitcoin::PublicKey> {
+        struct Derivator;
 
-        impl<C: secp256k1::Verification> Translator<DefiniteDescriptorKey> for Derivator<'_, C> {
+        impl Translator<DefiniteDescriptorKey> for Derivator {
             type TargetPk = bitcoin::PublicKey;
             type Error = core::convert::Infallible;
 
             fn pk(&mut self, pk: &DefiniteDescriptorKey) -> Result<Self::TargetPk, Self::Error> {
-                Ok(pk.derive_public_key(self.0))
+                Ok(pk.derive_public_key())
             }
 
             translate_hash_clone!(DefiniteDescriptorKey);
         }
 
-        let derived = self.translate_pk(&mut Derivator(secp));
+        let derived = self.translate_pk(&mut Derivator);
         match derived {
             Ok(derived) => derived,
             // Impossible to hit, since deriving keys does not change any Miniscript-relevant
@@ -1221,11 +1213,10 @@ pub(crate) use write_descriptor;
 mod tests {
     use core::convert::TryFrom;
 
+    use bitcoin::blockdata::opcodes;
     use bitcoin::blockdata::opcodes::all::{OP_CLTV, OP_CSV};
     use bitcoin::blockdata::script::Instruction;
-    use bitcoin::blockdata::{opcodes, script};
-    use bitcoin::hashes::Hash;
-    use bitcoin::script::PushBytes;
+    use bitcoin::script::{PushBytes, ScriptExt as _, WitnessScriptExt as _};
     use bitcoin::sighash::EcdsaSighashType;
     use bitcoin::{bip32, PublicKey, Sequence, XOnlyPublicKey};
 
@@ -1327,7 +1318,7 @@ mod tests {
         let pk = StdDescriptor::from_str(TEST_PK).unwrap();
         assert_eq!(
             pk.script_pubkey(),
-            ScriptBuf::from(vec![
+            ScriptPubKeyBuf::from(vec![
                 0x21, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xac,
@@ -1342,7 +1333,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             pkh.script_pubkey(),
-            script::Builder::new()
+            bitcoin::script::Builder::<bitcoin::script::ScriptPubKeyTag>::new()
                 .push_opcode(opcodes::all::OP_DUP)
                 .push_opcode(opcodes::all::OP_HASH160)
                 .push_slice(
@@ -1367,7 +1358,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             wpkh.script_pubkey(),
-            script::Builder::new()
+            bitcoin::script::Builder::<bitcoin::script::ScriptPubKeyTag>::new()
                 .push_opcode(opcodes::all::OP_PUSHBYTES_0)
                 .push_slice(
                     hash160::Hash::from_str("84e9ed95a38613f0527ff685a9928abe2d4754d4",)
@@ -1389,7 +1380,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             shwpkh.script_pubkey(),
-            script::Builder::new()
+            bitcoin::script::Builder::<bitcoin::script::ScriptPubKeyTag>::new()
                 .push_opcode(opcodes::all::OP_HASH160)
                 .push_slice(
                     hash160::Hash::from_str("f1c3b9a431134cb90a500ec06e0067cfa9b8bba7",)
@@ -1412,7 +1403,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             sh.script_pubkey(),
-            script::Builder::new()
+            bitcoin::script::Builder::<bitcoin::script::ScriptPubKeyTag>::new()
                 .push_opcode(opcodes::all::OP_HASH160)
                 .push_slice(
                     hash160::Hash::from_str("aa5282151694d3f2f32ace7d00ad38f927a33ac8",)
@@ -1435,7 +1426,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             wsh.script_pubkey(),
-            script::Builder::new()
+            bitcoin::script::Builder::<bitcoin::script::ScriptPubKeyTag>::new()
                 .push_opcode(opcodes::all::OP_PUSHBYTES_0)
                 .push_slice(
                     sha256::Hash::from_str(
@@ -1462,7 +1453,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             shwsh.script_pubkey(),
-            script::Builder::new()
+            bitcoin::script::Builder::<bitcoin::script::ScriptPubKeyTag>::new()
                 .push_opcode(opcodes::all::OP_HASH160)
                 .push_slice(
                     hash160::Hash::from_str("4bec5d7feeed99e1d0a23fe32a4afe126a7ff07e",)
@@ -1481,12 +1472,15 @@ mod tests {
     #[test]
     fn satisfy() {
         let secp = secp256k1::Secp256k1::new();
-        let sk =
-            secp256k1::SecretKey::from_slice(&b"sally was a secret key, she said"[..]).unwrap();
-        let pk = bitcoin::PublicKey::new(secp256k1::PublicKey::from_secret_key(&secp, &sk));
-        let msg = secp256k1::Message::from_digest_slice(&b"michael was a message, amusingly"[..])
-            .expect("32 bytes");
-        let sig = secp.sign_ecdsa(&msg, &sk);
+        let mut sk_bytes = [0u8; 32];
+        sk_bytes.copy_from_slice(&b"sally was a secret key, she said"[..]);
+        let sk = secp256k1::SecretKey::from_secret_bytes(sk_bytes).unwrap();
+        let pk = bitcoin::PublicKey::from_secp(secp256k1::PublicKey::from_secret_key(&sk));
+        let mut msg_bytes = [0u8; 32];
+        msg_bytes.copy_from_slice(&b"michael was a message, amusingly"[..]);
+        let msg = secp256k1::Message::from_digest(msg_bytes);
+        let _ = &secp;
+        let sig = secp256k1::ecdsa::sign(msg, &sk);
         let mut sigser = sig.serialize_der().to_vec();
         sigser.push(0x01); // sighash_all
 
@@ -1515,8 +1509,8 @@ mod tests {
         let ms = ms_str!("c:pk_k({})", pk);
 
         let mut txin = bitcoin::TxIn {
-            previous_output: bitcoin::OutPoint::default(),
-            script_sig: bitcoin::ScriptBuf::new(),
+            previous_output: bitcoin::OutPoint::COINBASE_PREVOUT,
+            script_sig: bitcoin::ScriptSigBuf::new(),
             sequence: Sequence::from_height(100),
             witness: Witness::default(),
         };
@@ -1526,48 +1520,48 @@ mod tests {
         assert_eq!(
             txin,
             bitcoin::TxIn {
-                previous_output: bitcoin::OutPoint::default(),
-                script_sig: script::Builder::new()
+                previous_output: bitcoin::OutPoint::COINBASE_PREVOUT,
+                script_sig: bitcoin::script::Builder::<bitcoin::script::ScriptSigTag>::new()
                     .push_slice(<&PushBytes>::try_from(sigser.as_slice()).unwrap())
                     .into_script(),
                 sequence: Sequence::from_height(100),
                 witness: Witness::default(),
             }
         );
-        assert_eq!(bare.unsigned_script_sig(), bitcoin::ScriptBuf::new());
+        assert_eq!(bare.unsigned_script_sig(), bitcoin::script::ScriptSigBuf::new());
 
         let pkh = Descriptor::new_pkh(pk).unwrap();
         pkh.satisfy(&mut txin, &satisfier).expect("satisfaction");
         assert_eq!(
             txin,
             bitcoin::TxIn {
-                previous_output: bitcoin::OutPoint::default(),
-                script_sig: script::Builder::new()
+                previous_output: bitcoin::OutPoint::COINBASE_PREVOUT,
+                script_sig: bitcoin::script::Builder::<bitcoin::script::ScriptSigTag>::new()
                     .push_slice(<&PushBytes>::try_from(sigser.as_slice()).unwrap())
-                    .push_key(&pk)
+                    .push_key(pk)
                     .into_script(),
                 sequence: Sequence::from_height(100),
                 witness: Witness::default(),
             }
         );
-        assert_eq!(pkh.unsigned_script_sig(), bitcoin::ScriptBuf::new());
+        assert_eq!(pkh.unsigned_script_sig(), bitcoin::script::ScriptSigBuf::new());
 
         let wpkh = Descriptor::new_wpkh(pk).unwrap();
         wpkh.satisfy(&mut txin, &satisfier).expect("satisfaction");
         assert_eq!(
             txin,
             bitcoin::TxIn {
-                previous_output: bitcoin::OutPoint::default(),
-                script_sig: bitcoin::ScriptBuf::new(),
+                previous_output: bitcoin::OutPoint::COINBASE_PREVOUT,
+                script_sig: bitcoin::ScriptSigBuf::new(),
                 sequence: Sequence::from_height(100),
                 witness: Witness::from_slice(&[sigser.clone(), pk.to_bytes()]),
             }
         );
-        assert_eq!(wpkh.unsigned_script_sig(), bitcoin::ScriptBuf::new());
+        assert_eq!(wpkh.unsigned_script_sig(), bitcoin::script::ScriptSigBuf::new());
 
         let shwpkh = Descriptor::new_sh_wpkh(pk).unwrap();
         shwpkh.satisfy(&mut txin, &satisfier).expect("satisfaction");
-        let redeem_script = script::Builder::new()
+        let redeem_script = bitcoin::script::Builder::<bitcoin::script::ScriptPubKeyTag>::new()
             .push_opcode(opcodes::all::OP_PUSHBYTES_0)
             .push_slice(
                 hash160::Hash::from_str("d1b2a1faf62e73460af885c687dee3b7189cd8ab")
@@ -1578,8 +1572,8 @@ mod tests {
         assert_eq!(
             txin,
             bitcoin::TxIn {
-                previous_output: bitcoin::OutPoint::default(),
-                script_sig: script::Builder::new()
+                previous_output: bitcoin::OutPoint::COINBASE_PREVOUT,
+                script_sig: bitcoin::script::Builder::<bitcoin::script::ScriptSigTag>::new()
                     .push_slice(<&PushBytes>::try_from(redeem_script.as_bytes()).unwrap())
                     .into_script(),
                 sequence: Sequence::from_height(100),
@@ -1588,7 +1582,7 @@ mod tests {
         );
         assert_eq!(
             shwpkh.unsigned_script_sig(),
-            script::Builder::new()
+            bitcoin::script::Builder::<bitcoin::script::ScriptSigTag>::new()
                 .push_slice(<&PushBytes>::try_from(redeem_script.as_bytes()).unwrap())
                 .into_script()
         );
@@ -1596,52 +1590,60 @@ mod tests {
         let ms = ms_str!("c:pk_k({})", pk);
         let sh = Descriptor::new_sh(ms.clone()).unwrap();
         sh.satisfy(&mut txin, &satisfier).expect("satisfaction");
+        let ms_redeem: bitcoin::script::RedeemScriptBuf = ms.encode();
         assert_eq!(
             txin,
             bitcoin::TxIn {
-                previous_output: bitcoin::OutPoint::default(),
-                script_sig: script::Builder::new()
+                previous_output: bitcoin::OutPoint::COINBASE_PREVOUT,
+                script_sig: bitcoin::script::Builder::<bitcoin::script::ScriptSigTag>::new()
                     .push_slice(<&PushBytes>::try_from(sigser.as_slice()).unwrap())
-                    .push_slice(<&PushBytes>::try_from(ms.encode().as_bytes()).unwrap())
+                    .push_slice(<&PushBytes>::try_from(ms_redeem.as_bytes()).unwrap())
                     .into_script(),
                 sequence: Sequence::from_height(100),
                 witness: Witness::default(),
             }
         );
-        assert_eq!(sh.unsigned_script_sig(), bitcoin::ScriptBuf::new());
+        assert_eq!(sh.unsigned_script_sig(), bitcoin::script::ScriptSigBuf::new());
 
         let ms = ms_str!("c:pk_k({})", pk);
 
         let wsh = Descriptor::new_wsh(ms.clone()).unwrap();
         wsh.satisfy(&mut txin, &satisfier).expect("satisfaction");
+        let ms_wit: bitcoin::WitnessScriptBuf = ms.encode();
         assert_eq!(
             txin,
             bitcoin::TxIn {
-                previous_output: bitcoin::OutPoint::default(),
-                script_sig: bitcoin::ScriptBuf::new(),
+                previous_output: bitcoin::OutPoint::COINBASE_PREVOUT,
+                script_sig: bitcoin::ScriptSigBuf::new(),
                 sequence: Sequence::from_height(100),
-                witness: Witness::from_slice(&[sigser.clone(), ms.encode().into_bytes()]),
+                witness: Witness::from_slice(&[sigser.clone(), ms_wit.into_bytes()]),
             }
         );
-        assert_eq!(wsh.unsigned_script_sig(), bitcoin::ScriptBuf::new());
+        assert_eq!(wsh.unsigned_script_sig(), bitcoin::script::ScriptSigBuf::new());
 
         let shwsh = Descriptor::new_sh_wsh(ms.clone()).unwrap();
         shwsh.satisfy(&mut txin, &satisfier).expect("satisfaction");
+        let ms_wit2: bitcoin::WitnessScriptBuf = ms.encode();
         assert_eq!(
             txin,
             bitcoin::TxIn {
-                previous_output: bitcoin::OutPoint::default(),
-                script_sig: script::Builder::new()
-                    .push_slice(<&PushBytes>::try_from(ms.encode().to_p2wsh().as_bytes()).unwrap())
+                previous_output: bitcoin::OutPoint::COINBASE_PREVOUT,
+                script_sig: bitcoin::script::Builder::<bitcoin::script::ScriptSigTag>::new()
+                    .push_slice(
+                        <&PushBytes>::try_from(ms_wit2.to_p2wsh().unwrap().as_bytes()).unwrap()
+                    )
                     .into_script(),
                 sequence: Sequence::from_height(100),
-                witness: Witness::from_slice(&[sigser.clone(), ms.encode().into_bytes()]),
+                witness: Witness::from_slice(&[sigser.clone(), ms_wit2.clone().into_bytes()]),
             }
         );
+        let ms_encoded: bitcoin::WitnessScriptBuf = ms.encode();
         assert_eq!(
             shwsh.unsigned_script_sig(),
-            script::Builder::new()
-                .push_slice(<&PushBytes>::try_from(ms.encode().to_p2wsh().as_bytes()).unwrap())
+            bitcoin::script::Builder::<bitcoin::script::ScriptSigTag>::new()
+                .push_slice(
+                    <&PushBytes>::try_from(ms_encoded.to_p2wsh().unwrap().as_bytes()).unwrap()
+                )
                 .into_script()
         );
     }
@@ -1777,8 +1779,8 @@ mod tests {
         .unwrap();
 
         let mut txin = bitcoin::TxIn {
-            previous_output: bitcoin::OutPoint::default(),
-            script_sig: bitcoin::ScriptBuf::new(),
+            previous_output: bitcoin::OutPoint::COINBASE_PREVOUT,
+            script_sig: bitcoin::ScriptSigBuf::new(),
             sequence: Sequence::ZERO,
             witness: Witness::default(),
         };
@@ -1968,7 +1970,6 @@ mod tests {
     #[test]
     fn test_sortedmulti() {
         fn _test_sortedmulti(raw_desc_one: &str, raw_desc_two: &str, raw_addr_expected: &str) {
-            let secp_ctx = secp256k1::Secp256k1::verification_only();
             let index = 5;
 
             // Parse descriptor
@@ -1985,13 +1986,13 @@ mod tests {
             let addr_one = desc_one
                 .derive_at_index(index)
                 .unwrap()
-                .derived_descriptor(&secp_ctx)
+                .derived_descriptor()
                 .address(bitcoin::Network::Bitcoin)
                 .unwrap();
             let addr_two = desc_two
                 .derive_at_index(index)
                 .unwrap()
-                .derived_descriptor(&secp_ctx)
+                .derived_descriptor()
                 .address(bitcoin::Network::Bitcoin)
                 .unwrap();
             let addr_expected = bitcoin::Address::from_str(raw_addr_expected)
@@ -2000,8 +2001,6 @@ mod tests {
             assert_eq!(addr_one, addr_expected);
             assert_eq!(addr_two, addr_expected);
         }
-
-        let secp_ctx = secp256k1::Secp256k1::verification_only();
 
         // P2SH and pubkeys (no wildcard — descriptors are fully defined)
         {
@@ -2016,7 +2015,7 @@ mod tests {
                 let desc = Descriptor::<DefiniteDescriptorKey>::from_str(desc_str).unwrap();
                 assert_eq!(desc.to_string(), desc_str);
                 let addr = desc
-                    .derived_descriptor(&secp_ctx)
+                    .derived_descriptor()
                     .address(bitcoin::Network::Bitcoin)
                     .unwrap();
                 assert_eq!(addr, addr_expected);
@@ -2038,7 +2037,7 @@ mod tests {
                 let desc = Descriptor::<DefiniteDescriptorKey>::from_str(desc_str).unwrap();
                 assert_eq!(desc.to_string(), desc_str);
                 let addr = desc
-                    .derived_descriptor(&secp_ctx)
+                    .derived_descriptor()
                     .address(bitcoin::Network::Bitcoin)
                     .unwrap();
                 assert_eq!(addr, addr_expected);
@@ -2055,17 +2054,16 @@ mod tests {
 
     #[test]
     fn test_parse_descriptor() {
-        let secp = &secp256k1::Secp256k1::signing_only();
-        let (descriptor, key_map) = Descriptor::parse_descriptor(secp, "wpkh(tprv8ZgxMBicQKsPcwcD4gSnMti126ZiETsuX7qwrtMypr6FBwAP65puFn4v6c3jrN9VwtMRMph6nyT63NrfUL4C3nBzPcduzVSuHD7zbX2JKVc/44'/0'/0'/0/*)").unwrap();
+        let (descriptor, key_map) = Descriptor::parse_descriptor("wpkh(tprv8ZgxMBicQKsPcwcD4gSnMti126ZiETsuX7qwrtMypr6FBwAP65puFn4v6c3jrN9VwtMRMph6nyT63NrfUL4C3nBzPcduzVSuHD7zbX2JKVc/44'/0'/0'/0/*)").unwrap();
         assert_eq!(descriptor.to_string(), "wpkh([2cbe2a6d/44'/0'/0']tpubDCvNhURocXGZsLNqWcqD3syHTqPXrMSTwi8feKVwAcpi29oYKsDD3Vex7x2TDneKMVN23RbLprfxB69v94iYqdaYHsVz3kPR37NQXeqouVz/0/*)#nhdxg96s");
         assert_eq!(key_map.len(), 1);
 
         // https://github.com/bitcoin/bitcoin/blob/7ae86b3c6845873ca96650fc69beb4ae5285c801/src/test/descriptor_tests.cpp#L355-L360
         macro_rules! check_invalid_checksum {
-            ($secp: ident,$($desc: expr),*) => {
+            ($($desc: expr),*) => {
                 use crate::{ParseError, ParseTreeError};
                 $(
-                    match Descriptor::parse_descriptor($secp, $desc) {
+                    match Descriptor::parse_descriptor($desc) {
                         Err(Error::Parse(ParseError::Tree(ParseTreeError::Checksum(_)))) => {},
                         Err(e) => panic!("Expected bad checksum for {}, got '{}'", $desc, e),
                         _ => panic!("Invalid checksum treated as valid: {}", $desc),
@@ -2073,7 +2071,7 @@ mod tests {
                 )*
             };
         }
-        check_invalid_checksum!(secp,
+        check_invalid_checksum!(
             "sh(multi(2,[00000000/111'/222]xprvA1RpRA33e1JQ7ifknakTFpgNXPmW2YvmhqLQYMmrj4xJXXWYpDPS3xz7iAxn8L39njGVyuoseXzU6rcxFLJ8HFsTjSyQbLYnMpCqE2VbFWc,xprv9uPDJpEQgRQfDcW7BkF7eTya6RPxXeJCqCJGHuCJ4GiRVLzkTXBAJMu2qaMWPrS7AANYqdq6vcBcBUdJCVVFceUvJFjaPdGZ2y9WACViL4L/0))#",
             "sh(multi(2,[00000000/111'/222]xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0))#",
             "sh(multi(2,[00000000/111'/222]xprvA1RpRA33e1JQ7ifknakTFpgNXPmW2YvmhqLQYMmrj4xJXXWYpDPS3xz7iAxn8L39njGVyuoseXzU6rcxFLJ8HFsTjSyQbLYnMpCqE2VbFWc,xprv9uPDJpEQgRQfDcW7BkF7eTya6RPxXeJCqCJGHuCJ4GiRVLzkTXBAJMu2qaMWPrS7AANYqdq6vcBcBUdJCVVFceUvJFjaPdGZ2y9WACViL4L/0))#ggrsrxfyq",
@@ -2087,8 +2085,8 @@ mod tests {
             "sh(multi(2,[00000000/111'/222]xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0))##tjq09x4t"
         );
 
-        Descriptor::parse_descriptor(secp, "sh(multi(2,[00000000/111'/222]xprvA1RpRA33e1JQ7ifknakTFpgNXPmW2YvmhqLQYMmrj4xJXXWYpDPS3xz7iAxn8L39njGVyuoseXzU6rcxFLJ8HFsTjSyQbLYnMpCqE2VbFWc,xprv9uPDJpEQgRQfDcW7BkF7eTya6RPxXeJCqCJGHuCJ4GiRVLzkTXBAJMu2qaMWPrS7AANYqdq6vcBcBUdJCVVFceUvJFjaPdGZ2y9WACViL4L/0))#ggrsrxfy").expect("Valid descriptor with checksum");
-        Descriptor::parse_descriptor(secp, "sh(multi(2,[00000000/111'/222]xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0))#tjg09x5t").expect("Valid descriptor with checksum");
+        Descriptor::parse_descriptor("sh(multi(2,[00000000/111'/222]xprvA1RpRA33e1JQ7ifknakTFpgNXPmW2YvmhqLQYMmrj4xJXXWYpDPS3xz7iAxn8L39njGVyuoseXzU6rcxFLJ8HFsTjSyQbLYnMpCqE2VbFWc,xprv9uPDJpEQgRQfDcW7BkF7eTya6RPxXeJCqCJGHuCJ4GiRVLzkTXBAJMu2qaMWPrS7AANYqdq6vcBcBUdJCVVFceUvJFjaPdGZ2y9WACViL4L/0))#ggrsrxfy").expect("Valid descriptor with checksum");
+        Descriptor::parse_descriptor("sh(multi(2,[00000000/111'/222]xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0))#tjg09x5t").expect("Valid descriptor with checksum");
     }
 
     #[test]
@@ -2115,10 +2113,9 @@ pk(03f28773c2d975288bc7d1d205c3748651b075fbc6610e58cddeeddf8f19405aa8))";
 
     #[test]
     fn parse_with_secrets() {
-        let secp = &secp256k1::Secp256k1::signing_only();
         let descriptor_str = "wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/44'/0'/0'/0/*)#v20xlvm9";
         let (descriptor, keymap) =
-            Descriptor::<DescriptorPublicKey>::parse_descriptor(secp, descriptor_str).unwrap();
+            Descriptor::<DescriptorPublicKey>::parse_descriptor(descriptor_str).unwrap();
 
         let expected = "wpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#u37l7u8u";
         assert_eq!(expected, descriptor.to_string());
@@ -2132,8 +2129,6 @@ pk(03f28773c2d975288bc7d1d205c3748651b075fbc6610e58cddeeddf8f19405aa8))";
     // https://github.com/rust-bitcoin/rust-miniscript/issues/785
     #[test]
     fn parse_descriptor_preserves_xprv_in_keymap() {
-        let secp = &secp256k1::Secp256k1::signing_only();
-
         for desc in [
             "pk(xprv9s21ZrQH143K31xYSDQpPDxsXRTUcvj2iNHm5NUtrGiGG5e2DtALGdso3pGz6ssrdK4PFmM8NSpSBHNqPqm55Qn3LqFtT2emdEXVYsCzC2U/*)#dl4n4vmp",
             // xprv containing "pub"
@@ -2142,7 +2137,7 @@ pk(03f28773c2d975288bc7d1d205c3748651b075fbc6610e58cddeeddf8f19405aa8))";
             assert_eq!(desc.parse::<Descriptor<DescriptorPublicKey>>().unwrap_err().to_string(), DescriptorKeyParseError::UnexpectedXPrivateKey.to_string());
 
             let (descriptor, key_map) =
-                Descriptor::<DescriptorPublicKey>::parse_descriptor(secp, desc).unwrap();
+                Descriptor::<DescriptorPublicKey>::parse_descriptor(desc).unwrap();
             assert_eq!(key_map.len(), 1);
             assert_eq!(descriptor.to_string_with_secret(&key_map), desc);
         }
@@ -2176,24 +2171,25 @@ pk(03f28773c2d975288bc7d1d205c3748651b075fbc6610e58cddeeddf8f19405aa8))";
 
     #[test]
     fn test_find_derivation_index_for_spk() {
-        let secp = secp256k1::Secp256k1::verification_only();
         let descriptor = Descriptor::from_str("tr([73c5da0a/86'/0'/0']xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/0/*)").unwrap();
-        let script_at_0_1 = ScriptBuf::from_hex(
-            "5120a82f29944d65b86ae6b5e5cc75e294ead6c59391a1edc5e016e3498c67fc7bbb",
-        )
-        .unwrap();
+        let script_at_0_1 = ScriptPubKeyBuf::from_bytes(
+            hex::decode_to_vec(
+                "5120a82f29944d65b86ae6b5e5cc75e294ead6c59391a1edc5e016e3498c67fc7bbb",
+            )
+            .unwrap(),
+        );
         let expected_concrete = Descriptor::from_str(
             "tr(0283dfe85a3151d2517290da461fe2815591ef69f2b18a2ce63f01697a8b313145)",
         )
         .unwrap();
 
-        assert_eq!(descriptor.find_derivation_index_for_spk(&secp, &script_at_0_1, 0..1), Ok(None));
+        assert_eq!(descriptor.find_derivation_index_for_spk(&script_at_0_1, 0..1), Ok(None));
         assert_eq!(
-            descriptor.find_derivation_index_for_spk(&secp, &script_at_0_1, 0..2),
+            descriptor.find_derivation_index_for_spk(&script_at_0_1, 0..2),
             Ok(Some((1, expected_concrete.clone())))
         );
         assert_eq!(
-            descriptor.find_derivation_index_for_spk(&secp, &script_at_0_1, 0..10),
+            descriptor.find_derivation_index_for_spk(&script_at_0_1, 0..10),
             Ok(Some((1, expected_concrete)))
         );
     }
@@ -2401,14 +2397,12 @@ pk(03f28773c2d975288bc7d1d205c3748651b075fbc6610e58cddeeddf8f19405aa8))";
 
     #[test]
     fn regression_806() {
-        let secp = secp256k1::Secp256k1::signing_only();
         type Desc = Descriptor<DescriptorPublicKey>;
         // OK
         Desc::from_str("pkh(111111111111111111111111111111110000008375319363688624584A111111)")
             .unwrap_err();
         // ERR: crashes in translate_pk
         Desc::parse_descriptor(
-            &secp,
             "pkh(111111111111111111111111111111110000008375319363688624584A111111)",
         )
         .unwrap_err();

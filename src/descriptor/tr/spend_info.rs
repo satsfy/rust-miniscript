@@ -7,9 +7,10 @@
 //!
 
 use bitcoin::key::{Parity, TapTweak as _, TweakedPublicKey, UntweakedPublicKey};
-use bitcoin::secp256k1::Secp256k1;
-use bitcoin::taproot::{ControlBlock, LeafVersion, TapLeafHash, TapNodeHash, TaprootMerkleBranch};
-use bitcoin::{Script, ScriptBuf};
+use bitcoin::script::{TapScript, TapScriptBuf};
+use bitcoin::taproot::{
+    ControlBlock, LeafVersion, TapLeafHash, TapNodeHash, TaprootMerkleBranchBuf,
+};
 
 use crate::miniscript::context::Tap;
 use crate::prelude::Vec;
@@ -68,7 +69,10 @@ impl<Pk: ToPublicKey> TrSpendInfo<Pk> {
             let depth = usize::from(leaf.depth());
             let script = leaf.miniscript().encode();
 
-            let leaf_hash = TapLeafHash::from_script(&script, leaf.leaf_version());
+            let leaf_hash = TapLeafHash::from_script(
+                TapScript::from_bytes(script.as_bytes()),
+                leaf.leaf_version(),
+            );
             let mut current_hash = TapNodeHash::from(leaf_hash);
 
             // 1. If this node increases our depth, add parents.
@@ -138,16 +142,15 @@ impl<Pk: ToPublicKey> TrSpendInfo<Pk> {
 
     /// Constructs a [`TrSpendInfo`] for a [`super::Tr`].
     pub fn from_tr(tr: &super::Tr<Pk>) -> Self {
-        let internal_key = tr.internal_key().to_x_only_pubkey();
+        let internal_key: UntweakedPublicKey = tr.internal_key().to_x_only_pubkey();
 
         let nodes = match tr.tap_tree() {
             Some(tree) => Self::nodes_from_tap_tree(tree),
             None => vec![],
         };
 
-        let secp = Secp256k1::verification_only();
-        let (output_key, output_key_parity) =
-            internal_key.tap_tweak(&secp, nodes.first().map(|node| node.sibling_hash));
+        let output_key = internal_key.tap_tweak(nodes.first().map(|node| node.sibling_hash));
+        let output_key_parity = output_key.as_x_only_public_key().parity();
 
         Self { internal_key, output_key, output_key_parity, nodes }
     }
@@ -204,7 +207,7 @@ impl<Pk: ToPublicKey> TrSpendInfo<Pk> {
             builder = builder
                 .add_leaf_with_ver(
                     leaf.depth(),
-                    ScriptBuf::from(leaf.script()),
+                    TapScriptBuf::from(leaf.script().to_vec()),
                     leaf.leaf_version(),
                 )
                 .expect("iterating through tree in correct DFS order")
@@ -222,7 +225,7 @@ struct TrSpendInfoNode<Pk: MiniscriptKey> {
 
 #[derive(Debug)]
 struct LeafData<Pk: MiniscriptKey> {
-    script: ScriptBuf,
+    script: TapScriptBuf,
     miniscript: Arc<Miniscript<Pk, Tap>>,
     leaf_hash: TapLeafHash,
 }
@@ -280,7 +283,7 @@ impl<'sp, Pk: MiniscriptKey> Iterator for TrSpendInfoIter<'sp, Pk> {
                         leaf_version: LeafVersion::TapScript,
                         output_key_parity: self.spend_info.output_key_parity,
                         internal_key: self.spend_info.internal_key,
-                        merkle_branch: TaprootMerkleBranch::try_from(merkle_stack)
+                        merkle_branch: TaprootMerkleBranchBuf::try_from(merkle_stack)
                             .expect("merkle stack guaranteed to be within allowable length"),
                     },
                 });
@@ -296,7 +299,7 @@ impl<'sp, Pk: MiniscriptKey> Iterator for TrSpendInfoIter<'sp, Pk> {
 /// Item yielded from a [`TrSpendInfoIter`].
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TrSpendInfoIterItem<'tr, Pk: MiniscriptKey> {
-    script: &'tr Script,
+    script: &'tr TapScript,
     miniscript: &'tr Arc<Miniscript<Pk, Tap>>,
     leaf_hash: TapLeafHash,
     control_block: ControlBlock,
@@ -305,7 +308,7 @@ pub struct TrSpendInfoIterItem<'tr, Pk: MiniscriptKey> {
 impl<'sp, Pk: MiniscriptKey> TrSpendInfoIterItem<'sp, Pk> {
     /// The Tapscript of this leaf.
     #[inline]
-    pub fn script(&self) -> &'sp Script { self.script }
+    pub fn script(&self) -> &'sp TapScript { self.script }
 
     /// The Tapscript of this leaf, in Miniscript form.
     #[inline]
@@ -369,11 +372,10 @@ mod tests {
     #[derive(PartialEq, Eq, Debug)]
     struct ExpectedLeaf {
         leaf_hash: TapLeafHash,
-        branch: TaprootMerkleBranch,
+        branch: TaprootMerkleBranchBuf,
     }
 
     fn test_cases() -> Vec<(String, ExpectedTree, Vec<ExpectedLeaf>)> {
-        let secp = Secp256k1::verification_only();
         let pk = "03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115"
             .parse::<bitcoin::PublicKey>()
             .unwrap();
@@ -391,8 +393,9 @@ mod tests {
 
         // Empty tree
         let merkle_root = None;
-        let internal_key = pk.to_x_only_pubkey();
-        let (output_key, output_key_parity) = internal_key.tap_tweak(&secp, merkle_root);
+        let internal_key = UntweakedPublicKey::from(pk.to_x_only_pubkey());
+        let output_key = internal_key.tap_tweak(merkle_root);
+        let output_key_parity = output_key.as_x_only_public_key().parity();
         ret.push((
             format!("tr({pk})"),
             ExpectedTree { internal_key, output_key, output_key_parity, merkle_root },
@@ -401,14 +404,15 @@ mod tests {
 
         // Single-leaf tree
         let merkle_root = Some(TapNodeHash::from(zero_hash));
-        let internal_key = pk.to_x_only_pubkey();
-        let (output_key, output_key_parity) = internal_key.tap_tweak(&secp, merkle_root);
+        let internal_key = UntweakedPublicKey::from(pk.to_x_only_pubkey());
+        let output_key = internal_key.tap_tweak(merkle_root);
+        let output_key_parity = output_key.as_x_only_public_key().parity();
         ret.push((
             format!("tr({pk},0)"),
             ExpectedTree { internal_key, output_key, output_key_parity, merkle_root },
             vec![ExpectedLeaf {
                 leaf_hash: zero_hash,
-                branch: TaprootMerkleBranch::try_from(vec![]).unwrap(),
+                branch: TaprootMerkleBranchBuf::try_from(vec![]).unwrap(),
             }],
         ));
 
@@ -418,20 +422,21 @@ mod tests {
                 .parse()
                 .unwrap(),
         );
-        let internal_key = pk.to_x_only_pubkey();
-        let (output_key, output_key_parity) = internal_key.tap_tweak(&secp, merkle_root);
+        let internal_key = UntweakedPublicKey::from(pk.to_x_only_pubkey());
+        let output_key = internal_key.tap_tweak(merkle_root);
+        let output_key_parity = output_key.as_x_only_public_key().parity();
         ret.push((
             format!("tr({pk},{{0,0}})"),
             ExpectedTree { internal_key, output_key, output_key_parity, merkle_root },
             vec![
                 ExpectedLeaf {
                     leaf_hash: zero_hash,
-                    branch: TaprootMerkleBranch::try_from(vec![TapNodeHash::from(zero_hash)])
+                    branch: TaprootMerkleBranchBuf::try_from(vec![TapNodeHash::from(zero_hash)])
                         .unwrap(),
                 },
                 ExpectedLeaf {
                     leaf_hash: zero_hash,
-                    branch: TaprootMerkleBranch::try_from(vec![TapNodeHash::from(zero_hash)])
+                    branch: TaprootMerkleBranchBuf::try_from(vec![TapNodeHash::from(zero_hash)])
                         .unwrap(),
                 },
             ],
@@ -443,20 +448,21 @@ mod tests {
                 .parse()
                 .unwrap(),
         );
-        let internal_key = pk.to_x_only_pubkey();
-        let (output_key, output_key_parity) = internal_key.tap_tweak(&secp, merkle_root);
+        let internal_key = UntweakedPublicKey::from(pk.to_x_only_pubkey());
+        let output_key = internal_key.tap_tweak(merkle_root);
+        let output_key_parity = output_key.as_x_only_public_key().parity();
         ret.push((
             format!("tr({pk},{{0,1}})"),
             ExpectedTree { internal_key, output_key, output_key_parity, merkle_root },
             vec![
                 ExpectedLeaf {
                     leaf_hash: zero_hash,
-                    branch: TaprootMerkleBranch::try_from(vec![TapNodeHash::from(one_hash)])
+                    branch: TaprootMerkleBranchBuf::try_from(vec![TapNodeHash::from(one_hash)])
                         .unwrap(),
                 },
                 ExpectedLeaf {
                     leaf_hash: one_hash,
-                    branch: TaprootMerkleBranch::try_from(vec![TapNodeHash::from(zero_hash)])
+                    branch: TaprootMerkleBranchBuf::try_from(vec![TapNodeHash::from(zero_hash)])
                         .unwrap(),
                 },
             ],
@@ -468,8 +474,9 @@ mod tests {
                 .parse()
                 .unwrap(),
         );
-        let internal_key = pk.to_x_only_pubkey();
-        let (output_key, output_key_parity) = internal_key.tap_tweak(&secp, merkle_root);
+        let internal_key = UntweakedPublicKey::from(pk.to_x_only_pubkey());
+        let output_key = internal_key.tap_tweak(merkle_root);
+        let output_key_parity = output_key.as_x_only_public_key().parity();
 
         ret.push((
             format!("tr({pk},{{0,{{0,tv:0}}}})"),
@@ -477,7 +484,7 @@ mod tests {
             vec![
                 ExpectedLeaf {
                     leaf_hash: zero_hash,
-                    branch: TaprootMerkleBranch::try_from(vec![
+                    branch: TaprootMerkleBranchBuf::try_from(vec![
                         "573d619569d58a36b52187e56f168650ac17f66a9a3afaf054900a04001019b3"
                             .parse::<TapNodeHash>()
                             .unwrap(),
@@ -486,7 +493,7 @@ mod tests {
                 },
                 ExpectedLeaf {
                     leaf_hash: zero_hash,
-                    branch: TaprootMerkleBranch::try_from(vec![
+                    branch: TaprootMerkleBranchBuf::try_from(vec![
                         "64ac241466a5e7032586718ff7465716f77a88d89946ce472daa4c3d0b81148f"
                             .parse::<TapNodeHash>()
                             .unwrap(),
@@ -498,7 +505,7 @@ mod tests {
                     leaf_hash: "64ac241466a5e7032586718ff7465716f77a88d89946ce472daa4c3d0b81148f"
                         .parse()
                         .unwrap(),
-                    branch: TaprootMerkleBranch::try_from(vec![
+                    branch: TaprootMerkleBranchBuf::try_from(vec![
                         TapNodeHash::from(zero_hash),
                         TapNodeHash::from(zero_hash),
                     ])
@@ -513,8 +520,9 @@ mod tests {
                 .parse()
                 .unwrap(),
         );
-        let internal_key = pk.to_x_only_pubkey();
-        let (output_key, output_key_parity) = internal_key.tap_tweak(&secp, merkle_root);
+        let internal_key = UntweakedPublicKey::from(pk.to_x_only_pubkey());
+        let output_key = internal_key.tap_tweak(merkle_root);
+        let output_key_parity = output_key.as_x_only_public_key().parity();
 
         ret.push((
             format!("tr({pk},{{uuu:0,{{0,uu:0}}}})"),
@@ -524,7 +532,7 @@ mod tests {
                     leaf_hash: "6498e1d56640a272493d1d87549f3347dc448ca674556a2110cdfe100e3c238b"
                         .parse()
                         .unwrap(),
-                    branch: TaprootMerkleBranch::try_from(vec![
+                    branch: TaprootMerkleBranchBuf::try_from(vec![
                         "7e3e98bab404812c8eebd21c5d825527676b8e9f261f7ad479f3a08a83a43fb4"
                             .parse::<TapNodeHash>()
                             .unwrap(),
@@ -533,7 +541,7 @@ mod tests {
                 },
                 ExpectedLeaf {
                     leaf_hash: zero_hash,
-                    branch: TaprootMerkleBranch::try_from(vec![
+                    branch: TaprootMerkleBranchBuf::try_from(vec![
                         "19417c32bc6ca7e0f6e65b006ac305107c6add73c8bef31181037e6faaa55e7f"
                             .parse::<TapNodeHash>()
                             .unwrap(),
@@ -547,7 +555,7 @@ mod tests {
                     leaf_hash: "19417c32bc6ca7e0f6e65b006ac305107c6add73c8bef31181037e6faaa55e7f"
                         .parse()
                         .unwrap(),
-                    branch: TaprootMerkleBranch::try_from(vec![
+                    branch: TaprootMerkleBranchBuf::try_from(vec![
                         TapNodeHash::from(zero_hash),
                         "6498e1d56640a272493d1d87549f3347dc448ca674556a2110cdfe100e3c238b"
                             .parse::<TapNodeHash>()
@@ -564,8 +572,9 @@ mod tests {
                 .parse()
                 .unwrap(),
         );
-        let internal_key = pk.to_x_only_pubkey();
-        let (output_key, output_key_parity) = internal_key.tap_tweak(&secp, merkle_root);
+        let internal_key = UntweakedPublicKey::from(pk.to_x_only_pubkey());
+        let output_key = internal_key.tap_tweak(merkle_root);
+        let output_key_parity = output_key.as_x_only_public_key().parity();
 
         ret.push((
             format!("tr({pk},{{{{0,{{uuu:0,0}}}},{{0,uu:0}}}})"),
@@ -573,7 +582,7 @@ mod tests {
             vec![
                 ExpectedLeaf {
                     leaf_hash: zero_hash,
-                    branch: TaprootMerkleBranch::try_from(vec![
+                    branch: TaprootMerkleBranchBuf::try_from(vec![
                         "57e3b7d414075ff4864deec9efa99db4462c038706306e02c58e02e957c8a51e"
                             .parse::<TapNodeHash>()
                             .unwrap(),
@@ -587,7 +596,7 @@ mod tests {
                     leaf_hash: "6498e1d56640a272493d1d87549f3347dc448ca674556a2110cdfe100e3c238b"
                         .parse()
                         .unwrap(),
-                    branch: TaprootMerkleBranch::try_from(vec![
+                    branch: TaprootMerkleBranchBuf::try_from(vec![
                         TapNodeHash::from(zero_hash),
                         TapNodeHash::from(zero_hash),
                         "7e3e98bab404812c8eebd21c5d825527676b8e9f261f7ad479f3a08a83a43fb4"
@@ -598,7 +607,7 @@ mod tests {
                 },
                 ExpectedLeaf {
                     leaf_hash: zero_hash,
-                    branch: TaprootMerkleBranch::try_from(vec![
+                    branch: TaprootMerkleBranchBuf::try_from(vec![
                         "6498e1d56640a272493d1d87549f3347dc448ca674556a2110cdfe100e3c238b"
                             .parse::<TapNodeHash>()
                             .unwrap(),
@@ -611,7 +620,7 @@ mod tests {
                 },
                 ExpectedLeaf {
                     leaf_hash: zero_hash,
-                    branch: TaprootMerkleBranch::try_from(vec![
+                    branch: TaprootMerkleBranchBuf::try_from(vec![
                         "19417c32bc6ca7e0f6e65b006ac305107c6add73c8bef31181037e6faaa55e7f"
                             .parse::<TapNodeHash>()
                             .unwrap(),
@@ -625,7 +634,7 @@ mod tests {
                     leaf_hash: "19417c32bc6ca7e0f6e65b006ac305107c6add73c8bef31181037e6faaa55e7f"
                         .parse()
                         .unwrap(),
-                    branch: TaprootMerkleBranch::try_from(vec![
+                    branch: TaprootMerkleBranchBuf::try_from(vec![
                         TapNodeHash::from(zero_hash),
                         "e034d7d8b221034861bf3893c63cb0ff60d28a7a00090d0dc57c26fec91983cb"
                             .parse::<TapNodeHash>()

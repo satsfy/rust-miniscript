@@ -12,8 +12,9 @@ use core::{cmp, fmt, mem};
 
 use bitcoin::hashes::hash160;
 use bitcoin::key::XOnlyPublicKey;
+use bitcoin::script::TapScriptBuf;
 use bitcoin::taproot::{ControlBlock, LeafVersion, TapLeafHash, TapNodeHash};
-use bitcoin::{absolute, relative, ScriptBuf, Sequence};
+use bitcoin::{absolute, relative, Sequence};
 
 use super::context::SigType;
 use crate::plan::AssetProvider;
@@ -47,7 +48,7 @@ pub trait Satisfier<Pk: MiniscriptKey + ToPublicKey> {
     /// Obtain a reference to the control block for a ver and script
     fn lookup_tap_control_block_map(
         &self,
-    ) -> Option<&BTreeMap<ControlBlock, (bitcoin::ScriptBuf, LeafVersion)>> {
+    ) -> Option<&BTreeMap<ControlBlock, (TapScriptBuf, LeafVersion)>> {
         None
     }
 
@@ -303,7 +304,7 @@ impl<Pk: MiniscriptKey + ToPublicKey, S: Satisfier<Pk>> Satisfier<Pk> for &S {
 
     fn lookup_tap_control_block_map(
         &self,
-    ) -> Option<&BTreeMap<ControlBlock, (bitcoin::ScriptBuf, LeafVersion)>> {
+    ) -> Option<&BTreeMap<ControlBlock, (TapScriptBuf, LeafVersion)>> {
         (**self).lookup_tap_control_block_map()
     }
 
@@ -363,7 +364,7 @@ impl<Pk: MiniscriptKey + ToPublicKey, S: Satisfier<Pk>> Satisfier<Pk> for &mut S
 
     fn lookup_tap_control_block_map(
         &self,
-    ) -> Option<&BTreeMap<ControlBlock, (bitcoin::ScriptBuf, LeafVersion)>> {
+    ) -> Option<&BTreeMap<ControlBlock, (TapScriptBuf, LeafVersion)>> {
         (**self).lookup_tap_control_block_map()
     }
 
@@ -473,7 +474,7 @@ macro_rules! impl_tuple_satisfier {
 
             fn lookup_tap_control_block_map(
                 &self,
-            ) -> Option<&BTreeMap<ControlBlock, (bitcoin::ScriptBuf, LeafVersion)>> {
+            ) -> Option<&BTreeMap<ControlBlock, (TapScriptBuf, LeafVersion)>> {
                 let &($(ref $ty,)*) = self;
                 $(
                     if let Some(result) = $ty.lookup_tap_control_block_map() {
@@ -603,11 +604,10 @@ mod tests {
         };
 
         // Generate a large pile of distinct unavailable keys.
-        let secp = secp256k1::Secp256k1::new();
         let unavailable_keys: Vec<PublicKey> =
             core::iter::successors(Some(available_keys[0]), |prev| {
-                prev.inner
-                    .add_exp_tweak(&secp, &secp256k1::Scalar::ONE)
+                prev.to_inner()
+                    .add_exp_tweak(&secp256k1::Scalar::ONE)
                     .ok()
                     .map(PublicKey::new)
             })
@@ -633,7 +633,7 @@ mod tests {
         let satisfier = (
             available_key_map,
             absolute::LockTime::from_height(1000).unwrap(),
-            absolute::LockTime::from_time(2000000000).unwrap(),
+            absolute::LockTime::from_mtp(2000000000).unwrap(),
         );
 
         // Construct a script that would mix timelocks:
@@ -696,7 +696,7 @@ mod tests {
         let plan = descriptor.into_plan(&satisfier).unwrap();
         assert_eq!(
             plan.absolute_timelock,
-            Some(absolute::LockTime::from_time(1_000_000_000).unwrap()),
+            Some(absolute::LockTime::from_mtp(1_000_000_000).unwrap()),
         );
     }
 }
@@ -748,7 +748,7 @@ pub enum Placeholder<Pk: MiniscriptKey> {
     /// \<empty item\>
     PushZero,
     /// Taproot leaf script
-    TapScript(ScriptBuf),
+    TapScript(TapScriptBuf),
     /// Taproot control block
     TapControlBlock(ControlBlock),
 }
@@ -794,7 +794,7 @@ impl<Pk: MiniscriptKey + ToPublicKey> Placeholder<Pk> {
         match self {
             Self::Pubkey(pk, size) => {
                 if *size == 33 {
-                    Some(pk.to_x_only_pubkey().serialize().to_vec())
+                    Some(pk.to_x_only_pubkey().serialize().0.to_vec())
                 } else {
                     Some(pk.to_public_key().to_bytes())
                 }
@@ -839,7 +839,7 @@ impl<Pk: MiniscriptKey + ToPublicKey> Placeholder<Pk> {
             Self::HashDissatisfaction => Some(vec![0; 32]),
             Self::PushZero => Some(vec![]),
             Self::PushOne => Some(vec![1]),
-            Self::TapScript(s) => Some(s.to_bytes()),
+            Self::TapScript(s) => Some(s.to_vec()),
             Self::TapControlBlock(cb) => Some(cb.serialize()),
         }
     }

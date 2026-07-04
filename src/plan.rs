@@ -20,9 +20,11 @@ use core::iter::FromIterator;
 
 use bitcoin::hashes::{hash160, ripemd160, sha256};
 use bitcoin::key::XOnlyPublicKey;
-use bitcoin::script::PushBytesBuf;
+use bitcoin::script::{
+    PushBytesBuf, RedeemScriptBuf, TapScriptBuf, WitnessScriptBuf, WitnessScriptExt as _,
+};
 use bitcoin::taproot::{ControlBlock, LeafVersion, TapLeafHash};
-use bitcoin::{absolute, bip32, psbt, relative, ScriptBuf, WitnessVersion};
+use bitcoin::{absolute, bip32, psbt, relative, WitnessVersion};
 
 use crate::descriptor::{self, Descriptor, DescriptorType, KeyMap};
 use crate::miniscript::hash256;
@@ -267,9 +269,7 @@ impl<Pk: MiniscriptKey + ToPublicKey> Plan<Pk> {
     pub fn satisfy<Sat: Satisfier<Pk>>(
         &self,
         stfr: &Sat,
-    ) -> Result<(Vec<Vec<u8>>, ScriptBuf), Error> {
-        use bitcoin::blockdata::script::Builder;
-
+    ) -> Result<(Vec<Vec<u8>>, bitcoin::script::ScriptSigBuf), Error> {
         let stack = self
             .template
             .iter()
@@ -282,14 +282,20 @@ impl<Pk: MiniscriptKey + ToPublicKey> Plan<Pk> {
                 vec![],
                 stack
                     .into_iter()
-                    .fold(Builder::new(), |builder, item| {
-                        let bytes = PushBytesBuf::try_from(item)
-                            .expect("All the possible placeholders can be made into PushBytesBuf");
-                        builder.push_slice(bytes)
-                    })
+                    .fold(
+                        bitcoin::script::Builder::<bitcoin::script::ScriptSigTag>::new(),
+                        |builder, item| {
+                            let bytes = PushBytesBuf::try_from(item).expect(
+                                "All the possible placeholders can be made into PushBytesBuf",
+                            );
+                            builder.push_slice(bytes)
+                        },
+                    )
                     .into_script(),
             ),
-            DescriptorType::Wpkh | DescriptorType::Tr => (stack, ScriptBuf::new()),
+            DescriptorType::Wpkh | DescriptorType::Tr => {
+                (stack, bitcoin::script::ScriptSigBuf::new())
+            }
             DescriptorType::ShWpkh => (stack, self.descriptor.unsigned_script_sig()),
             DescriptorType::Wsh | DescriptorType::ShWsh => {
                 let mut stack = stack;
@@ -319,7 +325,7 @@ impl Plan<DefiniteDescriptorKey> {
 
             #[derive(Default)]
             struct TrDescriptorData {
-                tap_script: Option<ScriptBuf>,
+                tap_script: Option<bitcoin::script::TapScriptBuf>,
                 control_block: Option<ControlBlock>,
                 spend_type: Option<SpendType>,
                 key_origins: BTreeMap<XOnlyPublicKey, bip32::KeySource>,
@@ -336,7 +342,7 @@ impl Plan<DefiniteDescriptorKey> {
                         Placeholder::TapScript(script) => data.tap_script = Some(script.clone()),
                         Placeholder::TapControlBlock(cb) => data.control_block = Some(cb.clone()),
                         Placeholder::SchnorrSigPk(pk, sig_type, _) => {
-                            let raw_pk = pk.to_x_only_pubkey();
+                            let raw_pk: XOnlyPublicKey = pk.to_x_only_pubkey();
 
                             match (&data.spend_type, sig_type) {
                                 // First encountered schnorr sig, update the `TrDescriptorData` accordingly
@@ -385,14 +391,15 @@ impl Plan<DefiniteDescriptorKey> {
                     .or_insert_with(|| (vec![], key_source));
             }
             if let (Some(tap_script), Some(control_block)) = (data.tap_script, data.control_block) {
-                input
-                    .tap_scripts
-                    .insert(control_block, (tap_script, LeafVersion::TapScript));
+                input.tap_scripts.insert(
+                    control_block,
+                    (TapScriptBuf::from_bytes(tap_script.into_bytes()), LeafVersion::TapScript),
+                );
             }
         } else {
             for item in &self.template {
                 if let Placeholder::EcdsaSigPk(pk) = item {
-                    let public_key = pk.to_public_key().inner;
+                    let public_key = pk.to_public_key().to_inner();
                     let master_fingerprint = pk.master_fingerprint();
                     for derivation_path in pk.full_derivation_paths() {
                         input
@@ -406,13 +413,28 @@ impl Plan<DefiniteDescriptorKey> {
                 Descriptor::Bare(_) | Descriptor::Pkh(_) | Descriptor::Wpkh(_) => {}
                 Descriptor::Sh(sh) => match sh.as_inner() {
                     descriptor::ShInner::Wsh(wsh) => {
-                        input.witness_script = Some(wsh.inner_script());
-                        input.redeem_script = Some(wsh.inner_script().to_p2wsh());
+                        let inner = wsh.inner_script();
+                        let witness_script = WitnessScriptBuf::from_bytes(inner.to_vec());
+                        let p2wsh_spk = witness_script
+                            .to_p2wsh()
+                            .expect("witness script size within bounds");
+                        input.redeem_script =
+                            Some(RedeemScriptBuf::from_bytes(p2wsh_spk.into_bytes()));
+                        input.witness_script = Some(witness_script);
                     }
-                    descriptor::ShInner::Wpkh(..) => input.redeem_script = Some(sh.inner_script()),
-                    descriptor::ShInner::Ms(_) => input.redeem_script = Some(sh.inner_script()),
+                    descriptor::ShInner::Wpkh(..) => {
+                        input.redeem_script =
+                            Some(RedeemScriptBuf::from_bytes(sh.inner_script().into_bytes()))
+                    }
+                    descriptor::ShInner::Ms(_) => {
+                        input.redeem_script =
+                            Some(RedeemScriptBuf::from_bytes(sh.inner_script().into_bytes()))
+                    }
                 },
-                Descriptor::Wsh(wsh) => input.witness_script = Some(wsh.inner_script()),
+                Descriptor::Wsh(wsh) => {
+                    input.witness_script =
+                        Some(WitnessScriptBuf::from_bytes(wsh.inner_script().into_bytes()))
+                }
                 Descriptor::Tr(_) => unreachable!("Tr is dealt with separately"),
             }
         }
@@ -728,7 +750,6 @@ mod test {
     use std::str::FromStr;
 
     use bitcoin::bip32::Xpub;
-    use secp256k1::Secp256k1;
 
     use super::*;
     use crate::*;
@@ -934,7 +955,7 @@ mod test {
                 vec![0, 1],
                 vec![],
                 None,
-                Some(absolute::LockTime::from_time(500_001_000).unwrap()),
+                Some(absolute::LockTime::from_mtp(500_001_000).unwrap()),
                 Some(153),
             ), // incompatible timelock
         ];
@@ -1036,7 +1057,7 @@ mod test {
                 vec![4],
                 vec![],
                 None,
-                Some(absolute::LockTime::from_time(1296000000).unwrap()),
+                Some(absolute::LockTime::from_mtp(1296000000).unwrap()),
                 None,
             ),
             // Spend with third leaf (key + timelock),
@@ -1067,7 +1088,7 @@ mod test {
             "02c2fd50ceae468857bb7eb32ae9cd4083e6c7e42fbbec179d81134b3e3830586c",
         )
         .unwrap()];
-        let hashes = vec![hash160::Hash::from_slice(&[0; 20]).unwrap()];
+        let hashes = vec![hash160::Hash::from_byte_array([0; 20])];
         let desc = format!("wsh(and_v(v:pk({}),hash160({})))", keys[0], hashes[0]);
 
         let tests = vec![
@@ -1159,17 +1180,15 @@ mod test {
         desc_str_fn: fn(&[bitcoin::PublicKey]) -> String,
         exp_witness_len: usize,
     ) -> Vec<Vec<u8>> {
-        let secp = Secp256k1::new();
-
         let (sks, pks): (Vec<_>, Vec<_>) = [
-            &b"sally was a secret key, she said"[..],
-            &b"polly was a secret key, she said"[..],
-            &b"bonny was a secret key, she said"[..],
+            b"sally was a secret key, she said",
+            b"polly was a secret key, she said",
+            b"bonny was a secret key, she said",
         ]
         .iter()
-        .map(|d| {
-            let sk = secp256k1::SecretKey::from_slice(d).unwrap();
-            let pk = bitcoin::PublicKey::new(secp256k1::PublicKey::from_secret_key(&secp, &sk));
+        .map(|d: &&[u8; 32]| {
+            let sk = secp256k1::SecretKey::from_secret_bytes(**d).unwrap();
+            let pk = bitcoin::PublicKey::from_secp(secp256k1::PublicKey::from_secret_key(&sk));
             (sk, pk)
         })
         .unzip();
@@ -1179,11 +1198,11 @@ mod test {
         let sigs = sks
             .iter()
             .map(|sk| {
-                let sighash =
-                    secp256k1::Message::from_digest_slice(&b"michael was a message, amusingly"[..])
-                        .expect("32 bytes");
+                let mut msg_bytes = [0u8; 32];
+                msg_bytes.copy_from_slice(&b"michael was a message, amusingly"[..]);
+                let sighash = secp256k1::Message::from_digest(msg_bytes);
                 bitcoin::ecdsa::Signature {
-                    signature: secp.sign_ecdsa(&sighash, sk),
+                    signature: secp256k1::ecdsa::sign(sighash, sk),
                     sighash_type: bitcoin::sighash::EcdsaSighashType::All,
                 }
             })

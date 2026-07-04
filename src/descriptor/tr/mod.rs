@@ -3,7 +3,7 @@
 use core::{cmp, fmt, hash};
 
 use bitcoin::taproot::{TAPROOT_CONTROL_BASE_SIZE, TAPROOT_CONTROL_NODE_SIZE};
-use bitcoin::{opcodes, Address, Network, ScriptBuf, Weight};
+use bitcoin::{opcodes, Address, Network, Weight};
 use sync::Arc;
 
 use super::checksum;
@@ -258,9 +258,9 @@ impl<Pk: MiniscriptKey> Tr<Pk> {
 
 impl<Pk: MiniscriptKey + ToPublicKey> Tr<Pk> {
     /// Obtains the corresponding script pubkey for this descriptor.
-    pub fn script_pubkey(&self) -> ScriptBuf {
+    pub fn script_pubkey(&self) -> bitcoin::script::ScriptPubKeyBuf {
         let output_key = self.spend_info().output_key();
-        let builder = bitcoin::blockdata::script::Builder::new();
+        let builder = bitcoin::script::Builder::<bitcoin::script::ScriptPubKeyTag>::new();
         builder
             .push_opcode(opcodes::all::OP_PUSHNUM_1)
             .push_slice(output_key.serialize())
@@ -276,7 +276,10 @@ impl<Pk: MiniscriptKey + ToPublicKey> Tr<Pk> {
     /// Returns satisfying non-malleable witness and scriptSig with minimum
     /// weight to spend an output controlled by the given descriptor if it is
     /// possible to construct one using the `satisfier`.
-    pub fn get_satisfaction<S>(&self, satisfier: &S) -> Result<(Vec<Vec<u8>>, ScriptBuf), Error>
+    pub fn get_satisfaction<S>(
+        &self,
+        satisfier: &S,
+    ) -> Result<(Vec<Vec<u8>>, bitcoin::script::ScriptSigBuf), Error>
     where
         S: Satisfier<Pk>,
     {
@@ -284,7 +287,7 @@ impl<Pk: MiniscriptKey + ToPublicKey> Tr<Pk> {
             .try_completing(satisfier)
             .expect("the same satisfier should manage to complete the template");
         if let Witness::Stack(stack) = satisfaction.stack {
-            Ok((stack, ScriptBuf::new()))
+            Ok((stack, bitcoin::script::ScriptSigBuf::new()))
         } else {
             Err(Error::CouldNotSatisfy)
         }
@@ -296,7 +299,7 @@ impl<Pk: MiniscriptKey + ToPublicKey> Tr<Pk> {
     pub fn get_satisfaction_mall<S>(
         &self,
         satisfier: &S,
-    ) -> Result<(Vec<Vec<u8>>, ScriptBuf), Error>
+    ) -> Result<(Vec<Vec<u8>>, bitcoin::script::ScriptSigBuf), Error>
     where
         S: Satisfier<Pk>,
     {
@@ -304,7 +307,7 @@ impl<Pk: MiniscriptKey + ToPublicKey> Tr<Pk> {
             .try_completing(satisfier)
             .expect("the same satisfier should manage to complete the template");
         if let Witness::Stack(stack) = satisfaction.stack {
-            Ok((stack, ScriptBuf::new()))
+            Ok((stack, bitcoin::script::ScriptSigBuf::new()))
         } else {
             Err(Error::CouldNotSatisfy)
         }
@@ -486,7 +489,7 @@ where
                 _ => unreachable!(),
             };
 
-            let script = ScriptBuf::from(leaf.script());
+            let script = bitcoin::script::TapScriptBuf::from(leaf.script());
             let control_block = leaf.control_block().clone();
 
             wit.push(Placeholder::TapScript(script));
