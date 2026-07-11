@@ -13,12 +13,10 @@ use core::mem;
 
 use bitcoin::hashes::hash160;
 use bitcoin::key::XOnlyPublicKey;
-#[cfg(not(test))] // https://github.com/rust-lang/rust/issues/121684
-use bitcoin::secp256k1;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::sighash::Prevouts;
 use bitcoin::taproot::LeafVersion;
-use bitcoin::{PublicKey, Script, ScriptBuf, TxOut, Witness};
+use bitcoin::{secp256k1, PublicKey, Script, ScriptBuf, TxOut, Witness};
 
 use super::{sanity_check, Error, InputError, Psbt, PsbtInputSatisfier};
 use crate::prelude::*;
