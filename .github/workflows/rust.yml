@@ -69,7 +69,7 @@ jobs:
         run: cargo rbmt lint
 
   Docs:
-    name: Docs - stable toolchain
+    name: Docs
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -78,17 +78,6 @@ jobs:
       - uses: ./.github/actions/setup-rbmt
       - name: "Build docs"
         run: cargo rbmt docs
-
-  Docsrs:
-    name: Docs - nightly toolchain
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-rbmt
-      - name: "Build docs.rs docs"
-        run: cargo rbmt docsrs
 
   Bench:
     name: Bench - nightly toolchain
