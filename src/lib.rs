@@ -87,6 +87,37 @@ compile_error!(
 pub use bitcoin;
 pub use hex;
 
+/// Re-exports of stable types from `bitcoin_units`, used internally in place of
+/// the unstable equivalents from `bitcoin`.
+pub mod stable {
+    pub use bitcoin_units::Sequence;
+}
+
+#[cfg(test)]
+mod stable_tests {
+    use super::stable::Sequence;
+    use crate::primitives::absolute_locktime::AbsLockTime;
+    use crate::primitives::relative_locktime::RelLockTime;
+
+    #[test]
+    fn test_sequence_and_locktime() {
+        // Test that a Sequence can be created and compared
+        let seq = Sequence::from_height(10);
+        assert!(seq.is_relative_lock_time());
+
+        // Test AbsLockTime with a block height
+        let abs = AbsLockTime::from_consensus(100).expect("valid height");
+        println!("AbsLockTime: {:?}", abs);
+
+        assert!(abs.is_block_height());
+
+        // Test RelLockTime from a block height
+        let rel = RelLockTime::from_height(10).expect("valid height");
+        println!("RelLockTime: {:?}", rel);
+        assert_eq!(rel.to_consensus_u32(), seq.to_consensus_u32());
+    }
+}
+
 #[cfg(not(feature = "std"))]
 #[macro_use]
 extern crate alloc;

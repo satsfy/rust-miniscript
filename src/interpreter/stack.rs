@@ -5,13 +5,14 @@
 
 use bitcoin::blockdata::{opcodes, script};
 use bitcoin::hashes::{hash160, ripemd160, sha256, Hash};
-use bitcoin::{absolute, relative, Sequence};
+use bitcoin::{absolute, relative};
 
 use super::error::PkEvalErrInner;
 use super::{verify_sersig, BitcoinKey, Error, HashLockType, KeySigPair, SatisfiedConstraint};
 use crate::hash256;
 use crate::miniscript::context::SigType;
 use crate::prelude::*;
+use crate::stable::Sequence;
 
 /// Definition of Stack Element of the Stack used for interpretation of Miniscript.
 ///
@@ -234,7 +235,10 @@ impl<'txin> Stack<'txin> {
         n: &relative::LockTime,
         sequence: Sequence,
     ) -> Option<Result<SatisfiedConstraint, Error>> {
-        if let Some(tx_locktime) = sequence.to_relative_lock_time() {
+        // The stable `Sequence` converts to the stable `relative::LockTime`
+        // but `n` is the unstable enum, so go back to unstable to compare.
+        if let Some(tx_locktime) = bitcoin::Sequence::from_stable(sequence).to_relative_lock_time()
+{
             if n.is_implied_by(tx_locktime) {
                 self.push(Element::Satisfied);
                 Some(Ok(SatisfiedConstraint::RelativeTimelock { n: *n }))
