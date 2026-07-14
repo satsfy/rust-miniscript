@@ -13,17 +13,19 @@ rust-version = "1.63.0"
 
 [features]
 default = ["std"]
-std = ["bitcoin/std", "bitcoin/secp-recovery", "bech32/std"]
+std = ["bitcoin/std", "bitcoin/secp-recovery", "bech32/std", "bitcoin-units/std"]
 compiler = []
 trace = []
 
-serde = ["dep:serde", "bitcoin/serde"]
+serde = ["dep:serde", "bitcoin/serde", "bitcoin-units/serde"]
 rand = ["bitcoin/rand"]
 base64 = ["bitcoin/base64"]
 
 [dependencies]
 bech32 = { version = "0.11.0", default-features = false, features = ["alloc"] }
-bitcoin = { version = "0.32.6", default-features = false }
+bitcoin = { version = "0.32.101", default-features = false, features = ["compat"] }
+# The 1.0.0 release tracking PR: https://github.com/rust-bitcoin/rust-bitcoin/pull/6248
+bitcoin-units = { version = "1.0.0", git = "https://github.com/tcharding/rust-bitcoin", branch = "push-puzmtlnlttlr", default-features = false, features = ["alloc"] }
 hex = { package = "hex-conservative", default-features = false, features = ["alloc"], version = "1.0.0" }
 
 serde = { version = "1.0.103", optional = true }
@@ -73,3 +75,7 @@ required-features = ["compiler"]
 [workspace]
 members = ["fuzz"]
 exclude = ["embedded", "bitcoind-tests"]
+
+[patch.crates-io]
+# The compat layer branch: https://github.com/rust-bitcoin/rust-bitcoin/pull/6259
+bitcoin = { git = "https://github.com/tcharding/rust-bitcoin", branch = "push-pwqxwuswpnsz" }

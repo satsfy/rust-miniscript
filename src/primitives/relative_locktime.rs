@@ -4,7 +4,9 @@
 
 use core::{cmp, convert, fmt};
 
-use bitcoin::{relative, Sequence};
+use bitcoin::relative;
+// The stable `Sequence`. The unstable one is referred to by full path below.
+use crate::stable::Sequence;
 
 /// Error parsing an absolute locktime.
 #[derive(Debug, PartialEq)]
@@ -73,13 +75,30 @@ impl convert::TryFrom<Sequence> for RelLockTime {
     }
 }
 
+// Keep the conversions to/from the unstable `Sequence` so that callers
+// holding transaction data do not need to touch the compat layer themselves.
+impl convert::TryFrom<bitcoin::Sequence> for RelLockTime {
+    type Error = RelLockTimeError;
+    fn try_from(seq: bitcoin::Sequence) -> Result<Self, RelLockTimeError> {
+        Self::try_from(seq.to_stable())
+    }
+}
+
 impl From<RelLockTime> for Sequence {
     fn from(lock_time: RelLockTime) -> Sequence { lock_time.0 }
 }
 
+impl From<RelLockTime> for bitcoin::Sequence {
+    fn from(lock_time: RelLockTime) -> Self { Self::from_stable(lock_time.0) }
+}
+
 impl From<RelLockTime> for relative::LockTime {
     fn from(lock_time: RelLockTime) -> relative::LockTime {
-        lock_time.0.to_relative_lock_time().unwrap()
+        // No compat conversion for the `relative::LockTime` enum, go through
+        // the unstable `Sequence`.
+        bitcoin::Sequence::from_stable(lock_time.0)
+            .to_relative_lock_time()
+            .unwrap()
     }
 }
 
@@ -97,4 +116,33 @@ impl cmp::Ord for RelLockTime {
 
 impl fmt::Display for RelLockTime {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { fmt::Display::fmt(&self.0, f) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HEIGHT_LOCK: u32 = 1000;
+    const TIME_LOCK: u32 = (1 << 22) | 1000; // BIP 68 type flag makes this time-based.
+    const DISABLED: u32 = (1 << 31) | 1000; // BIP 68 disable flag.
+
+    #[test]
+    fn stable_and_unstable_sequence_conversions_agree() {
+        for value in [1, HEIGHT_LOCK, TIME_LOCK] {
+            let from_stable = RelLockTime::try_from(Sequence::from_consensus(value)).unwrap();
+            let from_unstable =
+                RelLockTime::try_from(bitcoin::Sequence::from_consensus(value)).unwrap();
+            assert_eq!(from_stable, from_unstable);
+            assert_eq!(Sequence::from(from_stable).to_consensus_u32(), value);
+            assert_eq!(bitcoin::Sequence::from(from_unstable).to_consensus_u32(), value);
+        }
+    }
+
+    #[test]
+    fn invalid_sequences_rejected_from_both_types() {
+        assert!(RelLockTime::try_from(Sequence::from_consensus(DISABLED)).is_err());
+        assert!(RelLockTime::try_from(bitcoin::Sequence::from_consensus(DISABLED)).is_err());
+        assert!(RelLockTime::try_from(Sequence::ZERO).is_err());
+        assert!(RelLockTime::try_from(bitcoin::Sequence::ZERO).is_err());
+    }
 }

@@ -857,7 +857,9 @@ mod test {
 
     #[test]
     fn test_thresh() {
-        // relative::LockTime has no constructors except by going through Sequence
+        // relative::LockTime has no constructors except by going through Sequence.
+        // Must be the unstable `bitcoin::Sequence` so `to_relative_lock_time`
+        // yields the `bitcoin::relative::LockTime` that `test_inner` expects.
         use bitcoin::Sequence;
         let keys = vec![
             DescriptorPublicKey::from_str(
