@@ -12,11 +12,12 @@ use core::fmt;
 use core::str::FromStr;
 
 use bitcoin::hashes::{hash160, ripemd160, sha256, Hash};
-use bitcoin::{absolute, relative, secp256k1, sighash, taproot, Sequence, TxOut, Witness};
+use bitcoin::{absolute, relative, secp256k1, sighash, taproot, TxOut, Witness};
 
 use crate::miniscript::context::{NoChecks, SigType};
 use crate::miniscript::ScriptContext;
 use crate::prelude::*;
+use crate::stable::Sequence;
 use crate::{hash256, Descriptor, Miniscript, Terminal, ToPublicKey};
 
 mod error;

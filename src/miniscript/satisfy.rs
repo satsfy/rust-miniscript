@@ -11,12 +11,13 @@ use core::{cmp, fmt, mem};
 use bitcoin::hashes::hash160;
 use bitcoin::key::XOnlyPublicKey;
 use bitcoin::taproot::{ControlBlock, LeafVersion, TapLeafHash, TapNodeHash};
-use bitcoin::{absolute, relative, ScriptBuf, Sequence};
+use bitcoin::{absolute, relative, ScriptBuf};
 use sync::Arc;
 
 use super::context::SigType;
 use crate::plan::AssetProvider;
 use crate::prelude::*;
+use crate::stable::Sequence;
 use crate::util::witness_size;
 use crate::{
     AbsLockTime, Miniscript, MiniscriptKey, RelLockTime, ScriptContext, Terminal, Threshold,
@@ -115,7 +116,9 @@ impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for () {}
 
 impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for Sequence {
     fn check_older(&self, n: relative::LockTime) -> bool {
-        if let Some(lt) = self.to_relative_lock_time() {
+        // `n` is the unstable enum which has no compat conversion, so convert
+        // the stable sequence back to unstable and compare over there.
+        if let Some(lt) = bitcoin::Sequence::from_stable(*self).to_relative_lock_time() {
             Satisfier::<Pk>::check_older(&lt, n)
         } else {
             false
@@ -1807,5 +1810,31 @@ impl Satisfaction<Vec<u8>> {
         Satisfaction::<Placeholder<Pk>>::build_template_mall(term, &stfr, root_has_sig, leaf_hash)
             .try_completing(stfr)
             .expect("the same satisfier should manage to complete the template")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bitcoin::PublicKey;
+
+    use super::{relative, Satisfier, Sequence};
+    use crate::RelLockTime;
+
+    #[test]
+    fn stable_sequence_check_older() {
+        let csv_1000: relative::LockTime = RelLockTime::from_height(1000).into();
+        assert!(Satisfier::<PublicKey>::check_older(&Sequence::from_height(1000), csv_1000));
+        assert!(Satisfier::<PublicKey>::check_older(&Sequence::from_height(1001), csv_1000));
+        assert!(!Satisfier::<PublicKey>::check_older(&Sequence::from_height(999), csv_1000));
+        // A time-based sequence cannot satisfy a height-based lock.
+        assert!(!Satisfier::<PublicKey>::check_older(
+            &Sequence::from_512_second_intervals(1000),
+            csv_1000
+        ));
+        // A sequence with the BIP 68 disable flag set cannot satisfy anything.
+        assert!(!Satisfier::<PublicKey>::check_older(
+            &Sequence::from_consensus((1 << 31) | 1000),
+            csv_1000
+        ));
     }
 }
