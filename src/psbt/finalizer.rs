@@ -329,7 +329,7 @@ fn interpreter_inp_check<C: secp256k1::Verification, T: Borrow<TxOut>>(
     // Interpreter check
     {
         let cltv = psbt.unsigned_tx.lock_time;
-        let csv = psbt.unsigned_tx.input[index].sequence;
+        let csv = psbt.unsigned_tx.input[index].sequence.to_stable();
         let interpreter =
             interpreter::Interpreter::from_txdata(&spk, script_sig, witness, csv, cltv)
                 .map_err(|e| Error::InputError(InputError::Interpreter(e), index))?;

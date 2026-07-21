@@ -32,3 +32,7 @@ secp256k1 = {version = "0.29.0", features = ["rand-std"]}
 "0_19_1" = ["bitcoind/0_19_1"]
 "0_18_1" = ["bitcoind/0_18_1"]
 "0_17_2" = ["bitcoind/0_17_2"]
+
+[patch.crates-io]
+# The compat layer branch: https://github.com/rust-bitcoin/rust-bitcoin/pull/6259
+bitcoin = { git = "https://github.com/tcharding/rust-bitcoin", branch = "push-pwqxwuswpnsz" }

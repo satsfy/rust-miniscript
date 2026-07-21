@@ -342,7 +342,9 @@ impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for PsbtInputSatisfier<'_> {
             return false;
         }
 
-        <dyn Satisfier<Pk>>::check_older(&seq, n)
+        // The transaction sequence is the unstable type but the `Satisfier`
+        // impl is on the stable one, convert using the compat layer.
+        <dyn Satisfier<Pk>>::check_older(&seq.to_stable(), n)
     }
 
     fn lookup_hash160(&self, h: &Pk::Hash160) -> Option<Preimage32> {
