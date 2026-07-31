@@ -128,29 +128,29 @@ impl GetKey for DescriptorSecretKey {
                     Ok(None)
                 }
             }
-            (
-                DescriptorSecretKey::XPrv(descriptor_xkey),
-                ref key_request @ KeyRequest::Bip32(ref key_source),
-            ) => {
-                if let Some(key) = descriptor_xkey.xkey.get_key(key_request.clone(), secp)? {
-                    return Ok(Some(key));
-                }
+            (DescriptorSecretKey::XPrv(descriptor_xkey), KeyRequest::Bip32(ref key_source)) => {
+                // A successful `matches()` already guarantees the requested key source's fingerprint equals our origin
+                // (or, when there is no origin, the xkey's own) fingerprint.
+                //
+                // `xkey` is anchored at the origin, but the request path is master-relative, either:
+                // - origin: strip the origin prefix and use the remaining suffix.
+                // - no origin: use the full request path.
+                let (_, full_path) = key_source;
+                let derivation_path = match descriptor_xkey.matches(key_source, secp) {
+                    Some(_) => match &descriptor_xkey.origin {
+                        Some((_, origin_path)) => &full_path[origin_path.len()..],
+                        None => full_path.as_ref(),
+                    },
+                    None => return Ok(None),
+                };
 
-                if let Some(matched_path) = descriptor_xkey.matches(key_source, secp) {
-                    let (_, full_path) = key_source;
-
-                    let derivation_path = &full_path[matched_path.len()..];
-
-                    return Ok(Some(
-                        descriptor_xkey
-                            .xkey
-                            .derive_priv(secp, &derivation_path)
-                            .map_err(GetKeyError::Bip32)?
-                            .to_priv(),
-                    ));
-                }
-
-                Ok(None)
+                Ok(Some(
+                    descriptor_xkey
+                        .xkey
+                        .derive_priv(secp, &derivation_path)
+                        .map_err(GetKeyError::Bip32)?
+                        .to_priv(),
+                ))
             }
             (DescriptorSecretKey::XPrv(_), KeyRequest::XOnlyPubkey(_)) => {
                 Err(GetKeyError::NotSupported)
@@ -424,5 +424,24 @@ mod tests {
         assert!(matches!(result, Err(GetKeyError::NotSupported)));
         let result = keymap.get_key(request_x, &secp).unwrap();
         assert!(result.is_none(), "Should return None even on error");
+    }
+
+    // Master xprv in the descriptor must not sign sibling paths (`/9/7` vs `/0/*`).
+    #[test]
+    fn get_key_bip32_rejects_sibling_with_master_xprv() {
+        let secp = Secp256k1::new();
+        let master_xprv = "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi"
+            .parse::<Xpriv>()
+            .unwrap();
+        let fp = master_xprv.fingerprint(&secp);
+        let account_path: DerivationPath = "86h/1h/0h".parse().unwrap();
+        let descriptor = format!("tr({master_xprv}/{account_path}/0/*)");
+        let request_path: DerivationPath = format!("{account_path}/9/7").parse().unwrap();
+        let key_request = KeyRequest::Bip32((fp, request_path));
+        let (_, keymap) = Descriptor::parse_descriptor(&secp, &descriptor).unwrap();
+        let result = keymap
+            .get_key(key_request, &secp)
+            .expect("key lookup should not fail");
+        assert!(result.is_none(), "expected no matching key, got: {result:?}");
     }
 }
