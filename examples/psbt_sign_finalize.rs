@@ -6,10 +6,11 @@ use std::str::FromStr;
 use miniscript::bitcoin::consensus::encode::deserialize_hex;
 use miniscript::bitcoin::psbt::{self, Psbt};
 use miniscript::bitcoin::sighash::SighashCache;
+#[allow(clippy::disallowed_types)]
+use miniscript::bitcoin::Sequence as UnstableSequence;
 //use miniscript::bitcoin::secp256k1; // https://github.com/rust-lang/rust/issues/121684
 use miniscript::bitcoin::{
-    transaction, Address, Amount, Network, OutPoint, PrivateKey, Script, Sequence, Transaction,
-    TxIn, TxOut,
+    transaction, Address, Amount, Network, OutPoint, PrivateKey, Script, Transaction, TxIn, TxOut,
 };
 use miniscript::psbt::{PsbtExt, PsbtInputExt};
 use miniscript::Descriptor;
@@ -80,9 +81,10 @@ fn main() {
 
     let (outpoint, witness_utxo) = get_vout(&depo_tx, &bridge_descriptor.script_pubkey());
 
+    #[allow(clippy::disallowed_types)]
     let txin = TxIn {
         previous_output: outpoint,
-        sequence: Sequence::from_height(26),
+        sequence: UnstableSequence::from_height(26),
         ..Default::default()
     };
     psbt.unsigned_tx.input.push(txin);

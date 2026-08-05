@@ -4,7 +4,8 @@
 
 use core::{cmp, convert, fmt};
 
-use bitcoin::{relative, Sequence};
+use bitcoin::compat::Sequence;
+use bitcoin::relative;
 
 /// Error parsing an absolute locktime.
 #[derive(Debug, PartialEq)]
@@ -77,9 +78,12 @@ impl From<RelLockTime> for Sequence {
     fn from(lock_time: RelLockTime) -> Sequence { lock_time.0 }
 }
 
+#[allow(clippy::disallowed_types)]
 impl From<RelLockTime> for relative::LockTime {
     fn from(lock_time: RelLockTime) -> relative::LockTime {
-        lock_time.0.to_relative_lock_time().unwrap()
+        bitcoin::Sequence::from_stable(lock_time.0)
+            .to_relative_lock_time()
+            .unwrap()
     }
 }
 
