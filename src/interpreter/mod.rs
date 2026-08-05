@@ -11,8 +11,9 @@
 use core::fmt;
 use core::str::FromStr;
 
+use bitcoin::compat::Sequence;
 use bitcoin::hashes::{hash160, ripemd160, sha256, Hash};
-use bitcoin::{absolute, relative, secp256k1, sighash, taproot, Sequence, TxOut, Witness};
+use bitcoin::{absolute, relative, secp256k1, sighash, taproot, TxOut, Witness};
 
 use crate::miniscript::context::{NoChecks, SigType};
 use crate::miniscript::ScriptContext;
@@ -143,7 +144,7 @@ impl<'txin> Interpreter<'txin> {
         spk: &bitcoin::ScriptBuf,
         script_sig: &'txin bitcoin::Script,
         witness: &'txin Witness,
-        sequence: Sequence,            // CSV, relative lock time.
+        sequence: Sequence,      // CSV, relative lock time.
         lock_time: absolute::LockTime, // CLTV, absolute lock time.
     ) -> Result<Self, Error> {
         let (inner, stack, script_code) = inner::from_txdata(spk, script_sig, witness)?;

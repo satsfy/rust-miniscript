@@ -8,10 +8,11 @@
 
 use core::{cmp, fmt, mem};
 
+use bitcoin::compat::Sequence;
 use bitcoin::hashes::hash160;
 use bitcoin::key::XOnlyPublicKey;
 use bitcoin::taproot::{ControlBlock, LeafVersion, TapLeafHash, TapNodeHash};
-use bitcoin::{absolute, relative, ScriptBuf, Sequence};
+use bitcoin::{absolute, relative, ScriptBuf};
 use sync::Arc;
 
 use super::context::SigType;
@@ -115,7 +116,7 @@ impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for () {}
 
 impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for Sequence {
     fn check_older(&self, n: relative::LockTime) -> bool {
-        if let Some(lt) = self.to_relative_lock_time() {
+        if let Some(lt) = bitcoin::Sequence::from_stable(*self).to_relative_lock_time() {
             Satisfier::<Pk>::check_older(&lt, n)
         } else {
             false
