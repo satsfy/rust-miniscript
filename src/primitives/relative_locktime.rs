@@ -76,6 +76,7 @@ impl convert::TryFrom<Sequence> for RelLockTime {
 
 // Keep the conversions to/from the unstable sequence so that callers holding
 // transaction data do not need to touch the compat layer themselves.
+#[allow(clippy::disallowed_types)]
 impl convert::TryFrom<bitcoin::Sequence> for RelLockTime {
     type Error = RelLockTimeError;
     fn try_from(seq: bitcoin::Sequence) -> Result<Self, RelLockTimeError> {
@@ -87,10 +88,12 @@ impl From<RelLockTime> for Sequence {
     fn from(lock_time: RelLockTime) -> Sequence { lock_time.0 }
 }
 
+#[allow(clippy::disallowed_types)]
 impl From<RelLockTime> for bitcoin::Sequence {
     fn from(lock_time: RelLockTime) -> Self { Self::from_stable(lock_time.0) }
 }
 
+#[allow(clippy::disallowed_types)]
 impl From<RelLockTime> for relative::LockTime {
     fn from(lock_time: RelLockTime) -> relative::LockTime {
         bitcoin::Sequence::from_stable(lock_time.0)
@@ -116,6 +119,7 @@ impl fmt::Display for RelLockTime {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_types)] // The tests exercise the unstable conversions.
 mod tests {
     use super::*;
 

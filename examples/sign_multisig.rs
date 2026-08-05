@@ -2,11 +2,14 @@
 
 //! Example: Signing a 2-of-3 multisignature.
 
+// TxIn fixtures fill the unstable sequence.
+#![allow(clippy::disallowed_types)]
+
 use std::collections::HashMap;
 use std::str::FromStr;
 
 use bitcoin::blockdata::witness::Witness;
-use bitcoin::{absolute, ecdsa, transaction, Amount, Sequence};
+use bitcoin::{absolute, ecdsa, transaction, Amount, Sequence as UnstableSequence};
 
 fn main() {
     let mut tx = spending_transaction();
@@ -83,7 +86,7 @@ fn spending_transaction() -> bitcoin::Transaction {
         input: vec![bitcoin::TxIn {
             previous_output: Default::default(),
             script_sig: bitcoin::ScriptBuf::new(),
-            sequence: Sequence::MAX,
+            sequence: UnstableSequence::MAX,
             witness: Witness::default(),
         }],
         output: vec![bitcoin::TxOut {

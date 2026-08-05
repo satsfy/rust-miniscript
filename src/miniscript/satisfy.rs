@@ -115,6 +115,7 @@ pub trait Satisfier<Pk: MiniscriptKey + ToPublicKey> {
 impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for () {}
 
 impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for Sequence {
+    #[allow(clippy::disallowed_types)] // Compat boundary, `n` is the unstable enum.
     fn check_older(&self, n: relative::LockTime) -> bool {
         if let Some(lt) = bitcoin::Sequence::from_stable(*self).to_relative_lock_time() {
             Satisfier::<Pk>::check_older(&lt, n)

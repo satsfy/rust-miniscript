@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: CC0-1.0
 
+// TxIn fixtures fill the unstable sequence.
+#![allow(clippy::disallowed_types)]
+
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
@@ -8,8 +11,8 @@ use miniscript::bitcoin::psbt::{self, Psbt};
 use miniscript::bitcoin::sighash::SighashCache;
 //use miniscript::bitcoin::secp256k1; // https://github.com/rust-lang/rust/issues/121684
 use miniscript::bitcoin::{
-    transaction, Address, Amount, Network, OutPoint, PrivateKey, Script, Sequence, Transaction,
-    TxIn, TxOut,
+    transaction, Address, Amount, Network, OutPoint, PrivateKey, Script,
+    Sequence as UnstableSequence, Transaction, TxIn, TxOut,
 };
 use miniscript::psbt::{PsbtExt, PsbtInputExt};
 use miniscript::Descriptor;
@@ -82,7 +85,7 @@ fn main() {
 
     let txin = TxIn {
         previous_output: outpoint,
-        sequence: Sequence::from_height(26),
+        sequence: UnstableSequence::from_height(26),
         ..Default::default()
     };
     psbt.unsigned_tx.input.push(txin);

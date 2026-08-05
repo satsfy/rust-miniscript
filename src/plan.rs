@@ -856,9 +856,11 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::disallowed_types)] // Fills the unstable relative::LockTime.
     fn test_thresh() {
-        // relative::LockTime has no constructors except by going through Sequence
-        use bitcoin::Sequence;
+        // relative::LockTime has no constructors except by going through the
+        // unstable sequence, and `test_inner` expects the unstable enum.
+        use bitcoin::Sequence as UnstableSequence;
         let keys = vec![
             DescriptorPublicKey::from_str(
                 "02c2fd50ceae468857bb7eb32ae9cd4083e6c7e42fbbec179d81134b3e3830586c",
@@ -877,7 +879,7 @@ mod test {
             (
                 vec![],
                 vec![],
-                Some(Sequence(1000).to_relative_lock_time().unwrap()),
+                Some(UnstableSequence(1000).to_relative_lock_time().unwrap()),
                 None,
                 None,
             ),
@@ -886,7 +888,7 @@ mod test {
             (
                 vec![0],
                 vec![],
-                Some(Sequence(1000).to_relative_lock_time().unwrap()),
+                Some(UnstableSequence(1000).to_relative_lock_time().unwrap()),
                 None,
                 Some(80),
             ),
@@ -896,7 +898,7 @@ mod test {
             (
                 vec![0, 1],
                 vec![],
-                Some(Sequence(1000).to_relative_lock_time().unwrap()),
+                Some(UnstableSequence(1000).to_relative_lock_time().unwrap()),
                 None,
                 Some(80),
             ),
@@ -905,7 +907,7 @@ mod test {
                 vec![0, 1],
                 vec![],
                 Some(
-                    Sequence::from_512_second_intervals(10)
+                    UnstableSequence::from_512_second_intervals(10)
                         .to_relative_lock_time()
                         .unwrap(),
                 ),

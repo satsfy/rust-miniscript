@@ -1,3 +1,6 @@
+// TxIn fixtures fill the unstable sequence.
+#![allow(clippy::disallowed_types)]
+
 use std::str::FromStr;
 
 use bitcoin::absolute::LockTime;
@@ -5,7 +8,9 @@ use bitcoin::consensus::encode::serialize;
 use bitcoin::hashes::Hash;
 use bitcoin::hex::{Case, DisplayHex};
 use bitcoin::transaction::Version;
-use bitcoin::{Address, Amount, Network, Psbt, PublicKey, Sequence, TxIn, TxOut};
+use bitcoin::{
+    Address, Amount, Network, Psbt, PublicKey, Sequence as UnstableSequence, TxIn, TxOut,
+};
 use helper_fns::{produce_grim_hash, produce_kelly_hash, produce_key_pairs};
 use miniscript::descriptor::DescriptorSecretKey;
 use miniscript::policy::Concrete;
@@ -211,7 +216,7 @@ fn main() {
                 .unwrap(),
             vout: 0,
         },
-        sequence: Sequence(0),
+        sequence: UnstableSequence(0),
         //        sequence: Sequence(40),
         ..Default::default()
     };

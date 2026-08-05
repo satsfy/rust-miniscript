@@ -230,6 +230,7 @@ impl<'txin> Stack<'txin> {
     /// The reason we don't need to copy the Script semantics is that
     /// Miniscript never evaluates integers and it is safe to treat them as
     /// booleans
+    #[allow(clippy::disallowed_types)] // Compat boundary, `n` is the unstable enum.
     pub(super) fn evaluate_older(
         &mut self,
         n: &relative::LockTime,
