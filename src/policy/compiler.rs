@@ -5,7 +5,7 @@
 //! Optimizing compiler from concrete policies to Miniscript
 //!
 
-use core::{cmp, f64, fmt, hash, mem};
+use core::{cmp, fmt, hash, mem};
 #[cfg(feature = "std")]
 use std::error;
 
