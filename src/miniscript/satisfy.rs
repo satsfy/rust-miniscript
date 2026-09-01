@@ -8,11 +8,11 @@
 
 use core::{cmp, fmt, mem};
 
-use bitcoin::compat::{absolute, Sequence};
+use bitcoin::compat::{absolute, relative, Sequence};
 use bitcoin::hashes::hash160;
 use bitcoin::key::XOnlyPublicKey;
 use bitcoin::taproot::{ControlBlock, LeafVersion, TapLeafHash, TapNodeHash};
-use bitcoin::{relative, ScriptBuf};
+use bitcoin::ScriptBuf;
 use sync::Arc;
 
 use super::context::SigType;
@@ -115,9 +115,8 @@ pub trait Satisfier<Pk: MiniscriptKey + ToPublicKey> {
 impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for () {}
 
 impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for Sequence {
-    #[allow(clippy::disallowed_types)]
     fn check_older(&self, n: relative::LockTime) -> bool {
-        if let Some(lt) = bitcoin::Sequence::from_stable(*self).to_relative_lock_time() {
+        if let Some(lt) = self.to_relative_lock_time() {
             Satisfier::<Pk>::check_older(&lt, n)
         } else {
             false

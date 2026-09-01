@@ -7,8 +7,7 @@
 
 use core::{fmt, str};
 
-use bitcoin::compat::absolute;
-use bitcoin::relative;
+use bitcoin::compat::{absolute, relative};
 
 use super::ENTAILMENT_MAX_TERMINALS;
 use crate::iter::{Tree, TreeLike};

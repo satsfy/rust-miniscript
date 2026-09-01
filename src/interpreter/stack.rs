@@ -4,9 +4,8 @@
 //! Interpreter stack
 
 use bitcoin::blockdata::{opcodes, script};
-use bitcoin::compat::{absolute, Sequence};
+use bitcoin::compat::{absolute, relative, Sequence};
 use bitcoin::hashes::{hash160, ripemd160, sha256, Hash};
-use bitcoin::relative;
 
 use super::error::PkEvalErrInner;
 use super::{verify_sersig, BitcoinKey, Error, HashLockType, KeySigPair, SatisfiedConstraint};
@@ -230,14 +229,12 @@ impl<'txin> Stack<'txin> {
     /// The reason we don't need to copy the Script semantics is that
     /// Miniscript never evaluates integers and it is safe to treat them as
     /// booleans
-    #[allow(clippy::disallowed_types)]
     pub(super) fn evaluate_older(
         &mut self,
         n: &relative::LockTime,
         sequence: Sequence,
     ) -> Option<Result<SatisfiedConstraint, Error>> {
-        if let Some(tx_locktime) = bitcoin::Sequence::from_stable(sequence).to_relative_lock_time()
-        {
+        if let Some(tx_locktime) = sequence.to_relative_lock_time() {
             if n.is_implied_by(tx_locktime) {
                 self.push(Element::Satisfied);
                 Some(Ok(SatisfiedConstraint::RelativeTimelock { n: *n }))

@@ -18,12 +18,12 @@
 
 use core::iter::FromIterator;
 
-use bitcoin::compat::absolute;
+use bitcoin::compat::{absolute, relative};
 use bitcoin::hashes::{hash160, ripemd160, sha256};
 use bitcoin::key::XOnlyPublicKey;
 use bitcoin::script::PushBytesBuf;
 use bitcoin::taproot::{ControlBlock, LeafVersion, TapLeafHash};
-use bitcoin::{bip32, psbt, relative, ScriptBuf, WitnessVersion};
+use bitcoin::{bip32, psbt, ScriptBuf, WitnessVersion};
 
 use crate::descriptor::{self, Descriptor, DescriptorType, KeyMap};
 use crate::miniscript::hash256;
@@ -857,11 +857,7 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::disallowed_types)]
     fn test_thresh() {
-        // relative::LockTime has no constructors except by going through the
-        // unstable sequence, and `test_inner` expects the unstable enum.
-        use bitcoin::Sequence as UnstableSequence;
         let keys = vec![
             DescriptorPublicKey::from_str(
                 "02c2fd50ceae468857bb7eb32ae9cd4083e6c7e42fbbec179d81134b3e3830586c",
@@ -880,7 +876,7 @@ mod test {
             (
                 vec![],
                 vec![],
-                Some(UnstableSequence(1000).to_relative_lock_time().unwrap()),
+                Some(relative::LockTime::from_consensus(1000).unwrap()),
                 None,
                 None,
             ),
@@ -889,7 +885,7 @@ mod test {
             (
                 vec![0],
                 vec![],
-                Some(UnstableSequence(1000).to_relative_lock_time().unwrap()),
+                Some(relative::LockTime::from_consensus(1000).unwrap()),
                 None,
                 Some(80),
             ),
@@ -899,7 +895,7 @@ mod test {
             (
                 vec![0, 1],
                 vec![],
-                Some(UnstableSequence(1000).to_relative_lock_time().unwrap()),
+                Some(relative::LockTime::from_consensus(1000).unwrap()),
                 None,
                 Some(80),
             ),
@@ -907,11 +903,7 @@ mod test {
             (
                 vec![0, 1],
                 vec![],
-                Some(
-                    UnstableSequence::from_512_second_intervals(10)
-                        .to_relative_lock_time()
-                        .unwrap(),
-                ),
+                Some(relative::LockTime::from_512_second_intervals(10)),
                 None,
                 Some(153),
             ), // incompatible timelock

@@ -12,7 +12,7 @@ use core::fmt;
 #[cfg(feature = "std")]
 use std::error;
 
-use bitcoin::compat::absolute;
+use bitcoin::compat::{absolute, relative};
 use bitcoin::hashes::{hash160, sha256d, Hash};
 use bitcoin::psbt::{self, Psbt};
 #[cfg(not(test))] // https://github.com/rust-lang/rust/issues/121684
@@ -20,7 +20,7 @@ use bitcoin::secp256k1;
 use bitcoin::secp256k1::{Secp256k1, VerifyOnly};
 use bitcoin::sighash::{self, SighashCache};
 use bitcoin::taproot::{self, ControlBlock, LeafVersion, TapLeafHash};
-use bitcoin::{bip32, relative, transaction, Script, ScriptBuf};
+use bitcoin::{bip32, transaction, Script, ScriptBuf};
 
 use crate::miniscript::context::SigType;
 use crate::prelude::*;

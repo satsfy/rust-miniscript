@@ -1836,7 +1836,7 @@ mod tests {
                 }
             }
 
-            fn check_older(&self, _: bitcoin::relative::LockTime) -> bool { true }
+            fn check_older(&self, _: bitcoin::compat::relative::LockTime) -> bool { true }
 
             fn check_after(&self, _: bitcoin::compat::absolute::LockTime) -> bool { true }
         }
