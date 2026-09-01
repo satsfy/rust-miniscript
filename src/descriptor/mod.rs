@@ -15,10 +15,9 @@ use core::fmt;
 use core::ops::Range;
 use core::str::{self, FromStr};
 
+use bitcoin::compat::Weight;
 use bitcoin::hashes::{hash160, ripemd160, sha256};
-use bitcoin::{
-    secp256k1, Address, Network, Script, ScriptBuf, TxIn, Weight, Witness, WitnessVersion,
-};
+use bitcoin::{secp256k1, Address, Network, Script, ScriptBuf, TxIn, Witness, WitnessVersion};
 use sync::Arc;
 
 use crate::expression::FromTree as _;
