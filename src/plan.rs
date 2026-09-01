@@ -18,11 +18,12 @@
 
 use core::iter::FromIterator;
 
+use bitcoin::compat::absolute;
 use bitcoin::hashes::{hash160, ripemd160, sha256};
 use bitcoin::key::XOnlyPublicKey;
 use bitcoin::script::PushBytesBuf;
 use bitcoin::taproot::{ControlBlock, LeafVersion, TapLeafHash};
-use bitcoin::{absolute, bip32, psbt, relative, ScriptBuf, WitnessVersion};
+use bitcoin::{bip32, psbt, relative, ScriptBuf, WitnessVersion};
 
 use crate::descriptor::{self, Descriptor, DescriptorType, KeyMap};
 use crate::miniscript::hash256;
@@ -934,7 +935,7 @@ mod test {
                 vec![0, 1],
                 vec![],
                 None,
-                Some(absolute::LockTime::from_time(500_001_000).unwrap()),
+                Some(absolute::LockTime::from_mtp(500_001_000).unwrap()),
                 Some(153),
             ), // incompatible timelock
         ];
@@ -1036,7 +1037,7 @@ mod test {
                 vec![4],
                 vec![],
                 None,
-                Some(absolute::LockTime::from_time(1296000000).unwrap()),
+                Some(absolute::LockTime::from_mtp(1296000000).unwrap()),
                 None,
             ),
             // Spend with third leaf (key + timelock),

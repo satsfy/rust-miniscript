@@ -4,4 +4,5 @@ large-error-threshold = 256
 disallowed-types = [
     { path = "bitcoin::Sequence", reason = "unstable 0.32 sequence, import bitcoin::compat::Sequence" },
     { path = "bitcoin::Weight", reason = "unstable 0.32 weight, import bitcoin::compat::Weight" },
+    { path = "bitcoin::absolute::LockTime", reason = "unstable 0.32 absolute locktime, import bitcoin::compat::absolute" },
 ]

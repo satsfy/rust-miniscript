@@ -11,9 +11,9 @@
 use core::fmt;
 use core::str::FromStr;
 
-use bitcoin::compat::Sequence;
+use bitcoin::compat::{absolute, Sequence};
 use bitcoin::hashes::{hash160, ripemd160, sha256, Hash};
-use bitcoin::{absolute, relative, secp256k1, sighash, taproot, TxOut, Witness};
+use bitcoin::{relative, secp256k1, sighash, taproot, TxOut, Witness};
 
 use crate::miniscript::context::{NoChecks, SigType};
 use crate::miniscript::ScriptContext;

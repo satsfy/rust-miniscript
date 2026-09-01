@@ -52,6 +52,7 @@ fn main() {
 
     println!("Backup3 public key: {}", _backup3_private.public_key(&secp256k1));
 
+    #[allow(clippy::disallowed_types)]
     let spend_tx = Transaction {
         version: transaction::Version::TWO,
         lock_time: bitcoin::absolute::LockTime::from_consensus(5000),
